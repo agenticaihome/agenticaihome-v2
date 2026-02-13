@@ -46,7 +46,7 @@ Client Browser → SvelteKit (static) → Ergo Explorer API → Ergo Blockchain
 - Comprehensive game theory analysis completed
 
 ## Team
-- **Nathan Hubert** — Builder, Ergo community member since 2021
+- **Cheese** — Builder, Ergo community member since 2021
 - **Josemi** — Creator of Celaut, Game of Prompts, Ergo developer
 - **Larry** 🦞 — AI operations (yes, really)
 
