@@ -125,67 +125,8 @@
     }
 
     async function handleExecute() {
-        if (!$connected) {
-            errorMessage = 'Please connect your wallet first';
-            return;
-        }
-
-        if (!validateForm()) {
-            return;
-        }
-
-        isLoading = true;
-        transactionId = null;
-        errorMessage = null;
-
-        try {
-            // TODO: Replace with actual Fleet SDK transaction building
-            // This is placeholder logic for the escrow transaction
-            
-            const amount = parseFloat(ergAmount);
-            const amountNanoErgs = BigInt(Math.floor(amount * 1_000_000_000));
-            const fee = calculatePlatformFee();
-            
-            console.log('Building escrow transaction:', {
-                serviceHash,
-                amount: amountNanoErgs.toString(),
-                deadline,
-                userAddress: $address,
-                escrowContract: ESCROW_CONTRACT_V2
-            });
-
-            // Simulate transaction building and signing
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // TODO: Actual transaction implementation would look like:
-            /*
-            const transaction = await buildEscrowTransaction({
-                serviceHash,
-                amount: amountNanoErgs,
-                deadline: new Date(deadline),
-                userAddress: $address,
-                escrowContract: ESCROW_CONTRACT_V2
-            });
-            
-            const signedTx = await ergo.sign_tx(transaction);
-            const txId = await ergo.submit_tx(signedTx);
-            */
-            
-            // Placeholder transaction ID
-            const placeholderTxId = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            transactionId = placeholderTxId;
-            
-            // Reset form
-            serviceHash = '';
-            ergAmount = '';
-            deadline = getTomorrowDate();
-            
-        } catch (error: any) {
-            console.error('Transaction failed:', error);
-            errorMessage = error.message || 'Transaction failed. Please try again.';
-        } finally {
-            isLoading = false;
-        }
+        // Execution is not yet available — pending Celaut integration
+        errorMessage = 'Service execution is coming soon. We are currently designing the game theory and integration with the Celaut execution network.';
     }
 
     function handleServiceHashInput() {
@@ -339,38 +280,11 @@
                                 type="submit"
                                 size="lg"
                                 class="submit-button"
-                                disabled={isLoading || !validateForm()}
+                                disabled={isLoading}
                             >
-                                {#if isLoading}
-                                    <span class="loading-spinner">⏳</span>
-                                    Processing...
-                                {:else}
-                                    🔒 Lock ERG in Escrow
-                                {/if}
+                                🚧 Coming Soon — Celaut Integration Pending
                             </Button>
                         </form>
-
-                        <!-- Transaction Status -->
-                        {#if transactionId}
-                            <Alert class="success-alert">
-                                <AlertDescription>
-                                    <div class="success-content">
-                                        <div class="success-icon">✅</div>
-                                        <div>
-                                            <div class="success-title">Escrow Transaction Successful!</div>
-                                            <div class="success-details">
-                                                Transaction ID: 
-                                                <code class="tx-id">{transactionId}</code>
-                                            </div>
-                                            <div class="success-next">
-                                                Your ERG is now locked in escrow. The service provider will be notified 
-                                                and execution will begin shortly.
-                                            </div>
-                                        </div>
-                                    </div>
-                                </AlertDescription>
-                            </Alert>
-                        {/if}
 
                         {#if errorMessage}
                             <Alert class="error-alert">

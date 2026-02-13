@@ -296,7 +296,7 @@
                             <Button 
                                 variant="outline" 
                                 class="link-button"
-                                on:click={() => window.open('https://github.com/agenticaihome/v2', '_blank')}
+                                on:click={() => window.open('https://github.com/agenticaihome/agenticaihome-v2', '_blank')}
                             >
                                 <span class="button-icon">📂</span>
                                 GitHub Repository
@@ -314,7 +314,7 @@
                             <Button 
                                 variant="outline" 
                                 class="link-button"
-                                on:click={() => window.open('https://celaut.io', '_blank')}
+                                on:click={() => window.open('https://github.com/celaut-project', '_blank')}
                             >
                                 <span class="button-icon">🌐</span>
                                 Celaut Network
