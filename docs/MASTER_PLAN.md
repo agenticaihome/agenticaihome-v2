@@ -299,7 +299,7 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 ```scala
 {
-  // Signers: Nathan (AIH), Josemi (Celaut), Community Advisor (TBD)
+  // Signers: Cheese (AIH), Josemi (Celaut), Community Advisor (TBD)
   val nathan = PK("9f...")
   val josemi = PK("9e...")
   val community = PK("9d...")
@@ -907,7 +907,7 @@ Which aligns best with Celaut's existing payment model?
 
 **Q9: Service packaging.** We have a TypeScript agent packager that converts AIH agent specs to Celaut service specs (based on your proto definitions). Can we test this against a real Nodo instance to validate the mapping?
 
-**Q10: Multi-sig treasury.** Would you be a signer on the 2-of-3 multi-sig treasury? The contract is compiled and tested. We propose: Nathan (AIH), Josemi (Celaut), Community Advisor (TBD from Ergo ecosystem).
+**Q10: Multi-sig treasury.** Would you be a signer on the 2-of-3 multi-sig treasury? The contract is compiled and tested. We propose: Cheese (AIH), Josemi (Celaut), Community Advisor (TBD from Ergo ecosystem).
 
 ### Philosophical Questions
 
