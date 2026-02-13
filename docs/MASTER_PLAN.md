@@ -20,8 +20,9 @@
 4. [Reputation System — Mathematical Foundation](#4-reputation-system--mathematical-foundation)
 5. [Execution Verification](#5-execution-verification)
 6. [Economic Model](#6-economic-model)
-7. [Implementation Roadmap](#7-implementation-roadmap)
-8. [Open Questions for Josemi](#8-open-questions-for-josemi)
+7. [Indexer Architecture](#7-indexer-architecture)
+8. [Implementation Roadmap](#8-implementation-roadmap)
+9. [Open Questions for Josemi](#9-open-questions-for-josemi)
 
 ---
 
@@ -46,7 +47,11 @@
 │    Tokens (on-chain) │  │  • gRPC communication                │
 │  • Payment Resolution│  │  • Gas-based resource pricing        │
 │    (on-chain)        │  │  • Load balancing across peers       │
-│  • Treasury fees     │  │  • Dependency management             │
+│  • Delivery Bonds    │  │  • Dependency management             │
+│    (on-chain)        │  │                                      │
+│  • Insurance Pool    │  │                                      │
+│    (on-chain)        │  │                                      │
+│  • Treasury fees     │  │                                      │
 │    (on-chain)        │  │                                      │
 └──────────────────────┘  └──────────────────────────────────────┘
 
@@ -58,7 +63,7 @@
 
 > "The node doesn't know what task it's performing — you can only judge if it provides the resources it says it does."
 
-This is fundamental. Services are identified by **hash**, not by name. Nodes are interchangeable commodity compute providers. The node's job is to allocate resources faithfully. The service's job is to produce correct output given those resources.
+Services are identified by **hash**, not by name. Nodes are interchangeable commodity compute providers. The node's job is to allocate resources faithfully. The service's job is to produce correct output given those resources.
 
 ### Data Flow: Service Request to Completion
 
@@ -77,23 +82,24 @@ Step 1: CLIENT                    Step 2: ERGO CHAIN
                                             ▼
 Step 3: NODE SELECTION            Step 4: EXECUTION
 ┌──────────────────────┐         ┌──────────────────────┐
-│ After block T:        │         │ Winning node runs     │
-│ Highest-rep node     │         │ service S on Celaut   │
-│ (with rep ≥ R)       │────────▶│ via Nodo framework    │
-│ claims the job       │         │ Deterministic         │
-│                      │         │ container execution   │
+│ After block T:        │         │ Selected node runs    │
+│ Weighted random       │         │ service S on Celaut   │
+│ selection among       │────────▶│ via Nodo framework    │
+│ qualifying nodes      │         │ Posts delivery bond   │
+│ (rep ≥ R)             │         │ Deterministic exec    │
 └──────────────────────┘         └──────────┬───────────┘
                                             │
                                             ▼
 Step 5: SETTLEMENT                Step 6: REPUTATION
 ┌──────────────────────┐         ┌──────────────────────┐
-│ Payment resolves:     │         │ Commit-reveal rating: │
-│ 99% → Node           │         │ Both parties submit   │
-│ 1%  → Treasury       │         │ encrypted ratings     │
-│ + Gas consumed by    │         │ simultaneously, then  │
-│   Celaut node        │         │ reveal. EGO tokens    │
-└──────────────────────┘         │ updated on-chain.     │
-                                 └──────────────────────┘
+│ Payment resolves:     │         │ Batched rating:       │
+│ 99% → Node           │         │ Both parties sign     │
+│ 0.9% → Treasury      │         │ rating commitments    │
+│ 0.1% → Insurance Pool│         │ off-chain. Settled    │
+│ + Gas consumed by     │         │ on-chain periodically │
+│   Celaut node         │         │ (every ~100 blocks).  │
+│ Bond returned to node │         │ EGO tokens updated.   │
+└──────────────────────┘         └──────────────────────┘
 ```
 
 ### What Lives Where
@@ -103,10 +109,12 @@ Step 5: SETTLEMENT                Step 6: REPUTATION
 | Service Request (S, X, R, T) | Ergo chain (UTXO box) | Trustless, censorship-resistant |
 | EGO Reputation scores | Ergo chain (token boxes) | Verifiable by all, tamper-proof |
 | Payment resolution | Ergo chain (contract) | Atomic, no intermediary |
+| Delivery bonds | Ergo chain (contract) | Ensures node accountability |
+| Insurance pool | Ergo chain (contract) | Funds cross-validation |
 | Service binary/container | Celaut network (P2P) | Distributed, hash-addressed |
 | Execution runtime | Celaut Nodo instance | Deterministic, resource-metered |
 | Service output | Off-chain (client ↔ node) | Too large for chain; hash posted |
-| Rating commitments | Ergo chain (2-phase box) | Prevents retaliation |
+| Rating commitments | Off-chain (signed), settled on-chain in batches | Cost-efficient |
 | Frontend UI | Static hosting (IPFS/GH Pages) | Unstoppable, no server |
 
 ---
@@ -115,17 +123,17 @@ Step 5: SETTLEMENT                Step 6: REPUTATION
 
 ### Overview of Required Contracts
 
-We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
+We need 6 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 ### Contract 1: Service Request Box
 
-**Purpose:** Client locks ERG to request execution of service S by a reputable node.
+**Purpose:** Client locks ERG to request execution of service S. Node selection uses **weighted random selection** — probability of winning proportional to reputation among qualifying nodes.
 
 ```
 ┌─────────────────────────────────────────┐
 │ SERVICE REQUEST BOX                      │
 │                                          │
-│ Value:  X nanoERG (payment + 1% fee)     │
+│ Value:  X nanoERG (payment + fees)       │
 │ R0:     Value (auto)                     │
 │ R1:     Guard script (this contract)     │
 │ R2:     Tokens (empty)                   │
@@ -144,34 +152,51 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 ```scala
 {
-  // Path 1: Node claims after deadline
-  // - Current height ≥ deadline T (R7)
-  // - Claimant has EGO reputation ≥ R (R6) — verified via data input
-  // - Output[0] sends 99% to claimant address
-  // - Output[1] sends 1% to treasury address
-  // - Claimant's reputation box is a valid data input
-  
   val deadline = SELF.R7[Int].get
   val minRep = SELF.R6[Long].get
   val payment = SELF.R5[Long].get
   val clientPk = SELF.R8[SigmaProp].get
-  val treasuryAddr = TREASURY_BYTES // compiled constant
+  val treasuryAddr = TREASURY_BYTES
+  val insuranceAddr = INSURANCE_POOL_BYTES
+  
+  // --- Weighted Random Selection ---
+  // The claim window opens at block T and lasts W blocks.
+  // During the window, qualifying nodes register intent via 
+  // a commit tx (hash of their address + secret).
+  // At block T+W, selection uses the NEXT block header hash
+  // as verifiable randomness seed.
+  //
+  // Selection probability for node_i:
+  //   P(node_i) = rep_i / Σ(rep_j) for all qualifying j
+  //
+  // Implementation: sort qualifying nodes by cumulative rep sum,
+  // map randomness into [0, Σrep), select the node whose 
+  // cumulative range contains the random value.
+  // This is verified on-chain via data inputs of all claimants'
+  // EGO boxes + the block header.
   
   val claimPath = {
     HEIGHT >= deadline &&
+    HEIGHT < deadline + CLAIM_WINDOW &&
     // Data input 0: claimant's EGO reputation box
     CONTEXT.dataInputs(0).tokens.exists { t =>
       t._1 == EGO_TOKEN_ID && t._2 >= minRep
     } &&
-    // Payment distribution
-    OUTPUTS(0).value >= (payment * 99 / 100) &&
-    OUTPUTS(1).value >= (payment / 100) &&
-    OUTPUTS(1).propositionBytes == treasuryAddr
+    // Verifiable randomness: use block header at HEIGHT as seed
+    // Selection verified by the claim transaction structure
+    // (off-chain computed, on-chain verified)
+    
+    // Payment distribution (0.9% treasury, 0.1% insurance)
+    OUTPUTS(0).value >= (payment * 99 / 100) &&          // node
+    OUTPUTS(1).value >= (payment * 9 / 1000) &&           // treasury
+    OUTPUTS(1).propositionBytes == treasuryAddr &&
+    OUTPUTS(2).value >= (payment / 1000) &&               // insurance
+    OUTPUTS(2).propositionBytes == insuranceAddr
   }
   
-  // Path 2: Client reclaims after extended deadline (T + grace period)
+  // Client reclaims after extended deadline (T + W + grace)
   val reclaimPath = {
-    HEIGHT >= (deadline + GRACE_BLOCKS) &&
+    HEIGHT >= (deadline + CLAIM_WINDOW + GRACE_BLOCKS) &&
     clientPk
   }
   
@@ -179,10 +204,17 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 }
 ```
 
-**Design notes:**
-- The node proves reputation via a **data input** (read-only reference to their EGO token box). This is an eUTXO feature — we read the box without consuming it.
-- Grace period (e.g., 720 blocks ≈ 24 hours after deadline) lets the client reclaim if no node claims. Prevents ERG being locked forever.
-- Parameters hash in R9 allows the client to specify encrypted execution parameters that only the claiming node decrypts.
+**Weighted random selection explained:**
+
+The "highest rep wins" model creates a monopoly where top nodes capture all work. Instead, we use **reputation-proportional random selection**:
+
+- Let qualifying nodes be {n₁, n₂, ..., nₖ} with reputations {r₁, r₂, ..., rₖ} where each rᵢ ≥ R (the minimum threshold).
+- **P(nᵢ wins) = rᵢ / Σⱼrⱼ** for all qualifying nodes j.
+- A node with 2× the reputation of another has 2× the probability — but never a guarantee. New nodes with minimum reputation still get a chance.
+- **Verifiable randomness** comes from the Ergo block header hash at block T+W+1 (the first block after the claim window closes). Block headers contain the `nonce` and `extensionHash` which are unpredictable before mining. We use `hash(blockHeader || taskBoxId)` as the seed, ensuring per-task uniqueness.
+- The selection is deterministic given the seed — any observer can verify the winner.
+
+**Why this is better than winner-take-all:** It creates a healthy market where reputation is an advantage, not an absolute barrier. New entrants can still win tasks (at lower probability), preventing ossification. This follows the **proportional selection** mechanism used in proof-of-stake systems (Kiayias et al., 2017 — Ouroboros).
 
 ### Contract 2: EGO Reputation Token Box
 
@@ -192,19 +224,21 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 ┌─────────────────────────────────────────┐
 │ EGO REPUTATION BOX                       │
 │                                          │
-│ Value:  Min ERG (box storage rent)       │
+│ Value:  0.01 ERG (covers decades of     │
+│         storage rent — see §6.5)         │
 │ R0:     Value (auto)                     │
 │ R1:     Guard script (reputation contract)│
 │ R2:     Tokens: [(EGO_TOKEN_ID, score)]  │
 │ R3:     Creation info (auto)             │
 │ R4:     SigmaProp — Owner public key     │
-│ R5:     Long — Total tasks completed     │
+│ R5:     Long — Cumulative value transacted│
 │ R6:     Long — Tier level (0-4)          │
 │ R7:     Int — Last activity block height │
 │ R8:     Coll[Byte] — Rating history hash │
 │         (Merkle root of all ratings)     │
-│ R9:     Long — Reputation sub-scores     │
-│         (packed: client_rep | node_rep)  │
+│ R9:     (Long, Long, Int) — Packed:      │
+│         (client_rep, node_rep,           │
+│          first_active_block)             │
 └─────────────────────────────────────────┘
 ```
 
@@ -213,9 +247,7 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 ```scala
 {
   // EGO boxes can ONLY be spent by the Rating Resolution contract
-  // This makes them "soulbound" — the owner cannot transfer reputation
-  // The rating contract updates the score and re-creates the box
-  // at the SAME owner address
+  // or the Decay mechanism. Soulbound — owner cannot transfer.
   
   val isRatingResolution = {
     OUTPUTS(0).tokens(0)._1 == EGO_TOKEN_ID &&
@@ -223,55 +255,88 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
     OUTPUTS(0).propositionBytes == SELF.propositionBytes // same contract
   }
   
-  // Decay path: anyone can trigger reputation decay if inactive
+  // Decay path: anyone can trigger if inactive for >DECAY_PERIOD blocks
+  // Triggerer pays tx fee, receives DECAY_REWARD from the box value
   val decayPath = {
     val lastActive = SELF.R7[Int].get
     val currentScore = SELF.R2[Coll[(Coll[Byte], Long)]].get(0)._2
+    val newScore = currentScore * 99 / 100  // 1% decay
+    
     HEIGHT > lastActive + DECAY_PERIOD &&
-    OUTPUTS(0).R2[Coll[(Coll[Byte], Long)]].get(0)._2 == 
-      (currentScore * 99 / 100) // 1% decay
+    // Output 0: recreated EGO box with decayed score
+    OUTPUTS(0).R2[Coll[(Coll[Byte], Long)]].get(0)._2 == newScore &&
+    OUTPUTS(0).R4[SigmaProp].get == SELF.R4[SigmaProp].get &&
+    OUTPUTS(0).propositionBytes == SELF.propositionBytes &&
+    OUTPUTS(0).value >= SELF.value - DECAY_REWARD &&
+    // Output 1: reward to triggerer (incentivized maintenance)
+    OUTPUTS(1).value >= DECAY_REWARD
   }
   
-  isRatingResolution || decayPath
+  // Top-up path: owner can add ERG to cover future storage rent
+  val topUpPath = {
+    val ownerPk = SELF.R4[SigmaProp].get
+    OUTPUTS(0).value > SELF.value &&  // strictly more ERG
+    OUTPUTS(0).tokens == SELF.tokens &&
+    OUTPUTS(0).R4[SigmaProp].get == SELF.R4[SigmaProp].get &&
+    OUTPUTS(0).propositionBytes == SELF.propositionBytes &&
+    ownerPk  // owner must sign
+  }
+  
+  isRatingResolution || decayPath || topUpPath
 }
 ```
 
-**Soulbound property:** EGO tokens cannot be transferred to another address. The box can only be recreated at the same owner address. This is enforced by the contract checking `OUTPUTS(0).R4 == SELF.R4`.
+**Storage rent strategy (§6.5):** EGO boxes are initialized with 0.01 ERG — enough for ~50 years of storage rent at current rates. The `topUpPath` lets owners add more ERG if needed. Active participants naturally keep their boxes alive through rating updates. The decay mechanism doubles as garbage collection: truly abandoned boxes eventually lose all value and get collected by storage rent.
 
-### Contract 3: Rating Resolution Box (Commit-Reveal)
+**Decay trigger incentive:** Anyone can trigger decay on any EGO box inactive for >DECAY_PERIOD blocks. The triggerer pays the transaction fee (~0.001 ERG) but receives DECAY_REWARD (e.g., 0.0005 ERG) from the box. This creates a self-sustaining maintenance economy — bots can profitably scan for decayable boxes and keep the reputation system clean.
 
-**Purpose:** Two-phase rating where both parties commit encrypted ratings simultaneously, then reveal. Prevents strategic/retaliatory rating.
+### Contract 3: Rating Resolution (Batched Settlement)
+
+**Purpose:** Cost-efficient rating system using off-chain signed commitments with periodic on-chain settlement.
+
+**The problem with naive commit-reveal:** A full commit-reveal per task requires 4 transactions (2 commits + 2 reveals). At ~0.001 ERG per tx, that's 0.004 ERG overhead per task — significant for Tier 0 tasks worth 0.01 ERG (40% overhead!).
+
+**Solution: Batched rating with sigma-protocol signatures.**
+
+```
+Off-Chain Phase (continuous):
+  After each task, both parties create signed rating commitments:
+    commitment_C = Sign_C(taskId || hash(rating_C || salt_C))
+    commitment_N = Sign_N(taskId || hash(rating_N || salt_N))
+  
+  Commitments are exchanged off-chain (via Celaut P2P or direct).
+  Both parties store their counterparty's signed commitment.
+
+On-Chain Settlement (every ~100 blocks, or when batch is full):
+  A single settlement transaction includes:
+    - Multiple (commitment, reveal) pairs batched together
+    - All corresponding EGO box updates
+    - Sigma protocol verification of all signatures
+  
+  Settlement transaction structure:
+    Inputs:  [Rating Batch Box] + [EGO Box 1] + [EGO Box 2] + ...
+    Outputs: [Updated EGO Box 1] + [Updated EGO Box 2] + ...
+    Data Inputs: [Block header for randomness if needed]
+```
 
 ```
 ┌─────────────────────────────────────────┐
-│ RATING BOX — PHASE 1 (COMMIT)           │
+│ RATING BATCH BOX                         │
 │                                          │
-│ Value:  2 × RATING_STAKE nanoERG         │
-│ R4:     Coll[Byte] — Task ID (tx hash)  │
-│ R5:     Coll[Byte] — Client commit       │
-│         hash(rating_client + salt_client)│
-│ R6:     Coll[Byte] — Node commit         │
-│         hash(rating_node + salt_node)    │
-│ R7:     Int — Reveal deadline block      │
-│ R8:     SigmaProp — Client public key    │
-│ R9:     SigmaProp — Node public key      │
-└─────────────────────────────────────────┘
-
-┌─────────────────────────────────────────┐
-│ RATING BOX — PHASE 2 (REVEAL)           │
-│                                          │
-│ Spending condition: Both parties reveal  │
-│ their rating + salt. Contract verifies   │
-│ hash matches commit. Then updates both   │
-│ parties' EGO boxes accordingly.          │
-│                                          │
-│ If either party fails to reveal within   │
-│ N blocks, the other's rating stands and  │
-│ the non-revealer forfeits their stake.   │
+│ Value:  Accumulated rating stakes        │
+│ R4:     Coll[Byte] — Batch Merkle root   │
+│         (root of all commitment pairs)   │
+│ R5:     Int — Number of ratings in batch │
+│ R6:     Int — Settlement deadline block  │
+│ R7:     Coll[Byte] — Aggregated reveals  │
 └─────────────────────────────────────────┘
 ```
 
-**Why commit-reveal matters:** Without it, the second party to rate can retaliate. If I see you rated me poorly, I rate you poorly back. Commit-reveal makes both ratings independent — you rate based on reality, not strategy. This is a standard mechanism from sealed-bid auction theory (Vickrey, 1961).
+**Fallback for non-cooperation:** If one party refuses to provide their signed commitment off-chain, the other party can submit a single on-chain commit-reveal (2 tx) as a fallback. The non-cooperating party receives a default neutral rating and a small reputation penalty for forcing the expensive path.
+
+**Why batching works:** Amortizes the per-task overhead across many tasks. If 50 ratings settle in one batch, the cost per rating drops from ~0.004 ERG to ~0.0001 ERG. Ergo's multi-input/multi-output transactions make this natural — we update many EGO boxes in a single tx.
+
+**Sigma protocol usage:** Ergo's native sigma protocols (Schnorr signatures, AND/OR/THRESHOLD compositions) let us verify that each commitment was genuinely signed by the claimed party without revealing the rating until settlement. The signature proves: "this rating was committed at time T by key K" — preventing post-hoc fabrication.
 
 ### Contract 4: Payment Resolution Box
 
@@ -279,32 +344,128 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 ```scala
 {
-  // Triggered after node claims service request box
-  // Splits payment: 99% to node, 1% to treasury
-  // Also handles gas deposit forwarding to Celaut node
-  
   val nodePayment = SELF.value * 99 / 100
-  val treasuryFee = SELF.value / 100
+  val treasuryFee = SELF.value * 9 / 1000    // 0.9%
+  val insuranceFee = SELF.value / 1000         // 0.1%
   
   OUTPUTS(0).value >= nodePayment &&
   OUTPUTS(0).propositionBytes == nodeAddress &&
   OUTPUTS(1).value >= treasuryFee &&
-  OUTPUTS(1).propositionBytes == TREASURY_BYTES
+  OUTPUTS(1).propositionBytes == TREASURY_BYTES &&
+  OUTPUTS(2).value >= insuranceFee &&
+  OUTPUTS(2).propositionBytes == INSURANCE_POOL_BYTES
 }
 ```
 
 ### Contract 5: Treasury Multi-Sig Box
 
-**Purpose:** 2-of-3 multi-sig holding accumulated platform fees.
+**Purpose:** 2-of-3 multi-sig holding accumulated platform fees (0.9% of task value).
 
 ```scala
 {
-  // Signers: Cheese (AIH), Josemi (Celaut), Community Advisor (TBD)
-  val nathan = PK("9f...")
+  val cheese = PK("9f...")
   val josemi = PK("9e...")
   val community = PK("9d...")
   
-  atLeast(2, Coll(nathan, josemi, community))
+  atLeast(2, Coll(cheese, josemi, community))
+}
+```
+
+### Contract 6: Delivery Bond Box
+
+**Purpose:** Node posts a small ERG bond when claiming a task, guaranteeing execution. Prevents "claim and run" attacks with concrete economic penalties.
+
+```
+┌─────────────────────────────────────────┐
+│ DELIVERY BOND BOX                        │
+│                                          │
+│ Value:  Bond amount (% of task value)    │
+│ R4:     Coll[Byte] — Task ID (request   │
+│         box tx hash)                     │
+│ R5:     SigmaProp — Node public key      │
+│ R6:     SigmaProp — Client public key    │
+│ R7:     Int — Execution deadline block   │
+│ R8:     Int — Client response deadline   │
+│         (= exec deadline + RESPONSE_WIN) │
+└─────────────────────────────────────────┘
+```
+
+```scala
+{
+  val nodePk = SELF.R5[SigmaProp].get
+  val clientPk = SELF.R6[SigmaProp].get
+  val execDeadline = SELF.R7[Int].get
+  val responseDeadline = SELF.R8[Int].get
+  
+  // Path 1: Client confirms delivery → bond returned to node
+  val deliveryConfirmed = {
+    clientPk &&  // client signs confirmation
+    OUTPUTS(0).propositionBytes == nodePk.propBytes  // bond → node
+  }
+  
+  // Path 2: Client flags non-delivery before exec deadline
+  // AND exec deadline has passed → bond forfeited to client
+  val nonDelivery = {
+    HEIGHT > execDeadline &&
+    HEIGHT <= responseDeadline &&
+    clientPk &&  // client must sign the flag
+    OUTPUTS(0).propositionBytes == clientPk.propBytes  // bond → client
+  }
+  
+  // Path 3: Client doesn't respond by response deadline
+  // → bond auto-returns to node (prevents client griefing)
+  val clientTimeout = {
+    HEIGHT > responseDeadline &&
+    OUTPUTS(0).propositionBytes == nodePk.propBytes  // bond → node
+  }
+  
+  deliveryConfirmed || nonDelivery || clientTimeout
+}
+```
+
+**Bond sizing:** Bond = max(0.001 ERG, task_value × 5%). Large enough to deter abandonment, small enough that nodes aren't capital-constrained.
+
+**Anti-griefing:** The `clientTimeout` path is critical — without it, a malicious client could claim non-delivery, wait forever, and hold the node's bond hostage. The response window (e.g., 720 blocks ≈ 24h) forces the client to act or forfeit their claim.
+
+**Timeline:**
+```
+Block T+W:     Node wins selection, posts delivery bond
+Block T+W+E:   Execution deadline — node must deliver by here
+Block T+W+E+R: Response deadline — client must confirm/flag by here
+               If client silent → bond returns to node automatically
+```
+
+### Contract 7: Insurance Pool Box
+
+**Purpose:** Accumulates 0.1% of all task payments to fund cross-validation re-executions.
+
+```scala
+{
+  // Spending conditions:
+  // 1. Fund a verification re-execution (requires multi-sig or automated trigger)
+  // 2. Compensate aggrieved party in unresolvable disputes
+  
+  // Verification rate adapts to pool balance:
+  //   If pool > 10 ERG: verify 5% of tasks
+  //   If pool 1-10 ERG: verify 2% of tasks  
+  //   If pool < 1 ERG: verify 0.5% of tasks
+  //
+  // Selection of which tasks to verify uses block header randomness
+  // (same mechanism as node selection — verifiable, unpredictable)
+  
+  val isVerificationSpend = {
+    // Must reference a completed task box via data input
+    // Must send payment to a second execution node
+    // Requires treasury multi-sig approval
+    atLeast(2, Coll(cheese, josemi, community))
+  }
+  
+  val isDisputeResolution = {
+    // Compensate aggrieved party — requires multi-sig
+    atLeast(2, Coll(cheese, josemi, community))
+  }
+  
+  isVerificationSpend || isDisputeResolution
 }
 ```
 
@@ -313,9 +474,11 @@ We need 5 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 | Contract | R4 | R5 | R6 | R7 | R8 | R9 |
 |----------|----|----|----|----|----|----|
 | Service Request | Service Hash | Payment | Min Rep | Deadline | Client PK | Params Hash |
-| EGO Reputation | Owner PK | Tasks Done | Tier Level | Last Active | Rating Merkle | Sub-scores |
-| Rating (Commit) | Task ID | Client Commit | Node Commit | Reveal Deadline | Client PK | Node PK |
+| EGO Reputation | Owner PK | Cumulative Value | Tier Level | Last Active | Rating Merkle | (client_rep, node_rep, first_active) |
+| Rating Batch | Batch Merkle | Batch Count | Settlement Deadline | Agg. Reveals | — | — |
+| Delivery Bond | Task ID | Node PK | Client PK | Exec Deadline | Response Deadline | — |
 | Treasury | — | — | — | — | — | — |
+| Insurance Pool | — | — | — | — | — | — |
 
 ---
 
@@ -325,233 +488,182 @@ We analyze 12 attack vectors. For each: the attack, why it's dangerous, the defe
 
 ### 3.1 Sybil Attacks
 
-**Attack:** An adversary creates N fake wallets (nodes or clients) to manipulate reputation scores, spam ratings, or dominate node selection.
-
-**Why it's dangerous:** With zero cost to create identities, one actor can appear as many. They can inflate reputation through self-dealing, dilute honest participants' influence, or coordinate to overwhelm voting mechanisms.
+**Attack:** An adversary creates N fake wallets to manipulate reputation, spam ratings, or dominate node selection.
 
 **Defense — Multi-layered identity cost:**
 
-1. **Minimum stake to register:** Both nodes and clients must lock a minimum ERG deposit to participate. Creating 100 Sybil identities costs 100× the deposit.
+1. **Minimum stake to register:** Both nodes and clients must lock a minimum ERG deposit. Creating 100 Sybil identities costs 100× the deposit.
 
-2. **Progressive reputation tiers:** New identities start at Tier 0 (max 0.01 ERG tasks). Reaching Tier 2 requires completing 10 Tier 1 tasks successfully. The economic cost of bootstrapping a Sybil identity to a useful reputation level exceeds the potential gain.
+2. **Progressive reputation tiers (value-based):** New identities start at Tier 0. Tier progression requires cumulative value transacted AND time gates (see §4.6). The economic cost of bootstrapping a Sybil identity exceeds the potential gain.
 
-3. **Graph analysis (off-chain, fed into reputation):** Detect clusters of addresses with common funding sources, synchronized activity, and mutual rating patterns. Dampening factor applied to ratings from detected clusters.
+3. **Graph analysis (off-chain, fed into reputation):** Detect clusters of addresses with common funding sources, synchronized activity, and mutual rating patterns.
 
-**Why it works mathematically:** Let C_sybil = cost to create and bootstrap one fake identity to Tier k. Let V_attack = maximum extractable value from one Tier k identity before detection. The system is Sybil-resistant when C_sybil > V_attack for all k. With tiered progression:
+**Why it works:** Let C_sybil = cost to bootstrap one fake identity to Tier k. With value-based tiers:
 
 ```
-C_sybil(Tier 2) = stake + sum of (10 genuine Tier 1 tasks) + time
-                ≈ 0.1 ERG + 10 × 0.1 ERG + weeks of activity
-                ≈ 1.1 ERG + opportunity cost
+C_sybil(Tier 2) = stake + 1 ERG cumulative transacted + 2000 blocks waiting
+                ≈ 0.01 + 1 ERG + ~3 days minimum
+                ≈ 1.01 ERG + opportunity cost
 
 V_attack(Tier 2) = max single task at Tier 2 = 1 ERG
 ```
 
-The cost exceeds the benefit even before accounting for detection penalties.
+The cost exceeds the benefit before accounting for detection penalties.
 
 ### 3.2 Collusion Rings
 
 **Attack:** Group of M actors coordinate: A requests service from B, B "executes," both rate positively. Repeat across ring members to inflate all reputations.
 
-**Why it's dangerous:** Unlike simple Sybils, colluding actors perform real transactions with real ERG, making detection harder. They build seemingly legitimate reputation histories.
-
 **Defense — 4-layer detection:**
 
-1. **Repeat-dampening:** The k-th rating between the same pair of addresses carries weight 1/k. Third interaction = 1/3 weight. This is enforced by checking the Merkle root of rating history (R8 in EGO box).
+1. **Repeat-dampening:** The k-th rating between the same pair carries weight 1/k. Enforced by checking the Merkle root of rating history (R8 in EGO box).
 
-2. **Diversity scoring:** Reputation earned from diverse counterparties is worth more. If 80% of your positive ratings come from 3 addresses, your diversity score is low and your effective reputation is heavily discounted.
-
+2. **Diversity scoring:**
    ```
    diversity_factor = unique_raters / total_ratings
    effective_rep = raw_rep × diversity_factor^α   (α ≈ 0.5)
    ```
 
-3. **Economic cost:** Every "fake" task in the ring requires locking real ERG and paying the 1% treasury fee. A ring of 10 members doing 10 tasks each at 0.1 ERG = 1 ERG in fees paid to the treasury for the privilege of inflating reputation.
+3. **Economic cost:** Every "fake" task costs real ERG (task value + 1% fee). Value-based tiers mean farming with micro-tasks doesn't help — you need real cumulative value.
 
-4. **Circular detection:** When the rating graph contains cycles (A→B, B→C, C→A), all ratings in the cycle receive progressive dampening. Detected via off-chain graph analysis, results committed on-chain as evidence.
+4. **Circular detection:** Rating graph cycles (A→B→C→A) receive progressive dampening via off-chain graph analysis.
 
-**Why it works (game theory):** Collusion rings are a coordination game. The Ring must sustain cooperation among M members, any of whom could defect (rate honestly, pocket the ERG, stop participating). The Nash equilibrium of the ring game requires sustained coordination cost > individual defection benefit, which becomes increasingly unstable as M grows. Meanwhile, the economic cost (1% fee per transaction) and repeat-dampening ensure the ring's reputation inflation has diminishing returns.
+**Game theory:** Collusion rings are coordination games with unstable Nash equilibria as M grows. Any member can defect. Meanwhile, value-based tier requirements make the ring's cost proportional to the reputation gained — no shortcuts.
 
 ### 3.3 Dishonest Client (Josemi's #1 Concern)
 
 **Attack:** Client receives valid execution, rates it invalid. Gets service for free while damaging node's reputation.
 
-**Why it's dangerous:** If the client faces no cost for lying, rational nodes won't participate. This is the fundamental trust asymmetry: the client knows whether the work was good; no one else does (for non-deterministic services).
-
 **Defense — 5-mechanism stack:**
 
-1. **Commit-reveal bilateral rating:** Client cannot see the node's rating before committing their own. Eliminates strategic retaliation. Both rate based on reality.
+1. **Commit-reveal bilateral rating** (via batched settlement): Both rate independently before seeing each other's rating.
 
-2. **Client reputation at stake:** A negative rating costs the client a small amount of reputation (the "rating cost"). A pattern of negative ratings flags the client. Nodes with high reputation can refuse low-reputation clients. This creates bilateral skin-in-the-game.
+2. **Client reputation at stake:** Pattern of negative ratings flags the client. High-rep nodes can refuse low-rep clients.
 
-3. **Stake-to-rate-negative:** To submit a negative rating, the client must stake Y ERG (proportional to the task value). If the node disputes and cross-validation or community consensus sides with the node, the client loses the stake. This makes dishonest negative ratings expensive.
+3. **Stake-to-rate-negative:** Negative rating requires staking Y ERG. If cross-validation sides with node, client loses stake.
 
-4. **Statistical anomaly detection:** Track each client's negative-to-positive ratio. Clients who rate negatively more than 2σ above the network average get flagged. Their future ratings carry reduced weight (formally: Bayesian reputation update with skeptical prior for flagged clients).
+4. **Statistical anomaly detection:** Clients with negative-to-positive ratio >2σ above average get flagged; future ratings carry reduced weight (Bayesian update with skeptical prior).
 
-5. **For deterministic services (Celaut's strength):** Re-execution is possible. If the client rates negatively but re-execution produces a matching output hash, the client's claim is provably false. Automatic resolution in the node's favor.
-
-**Why it works:** The combination creates a multi-factor cost: direct stake cost, reputation damage, statistical flagging, and (for deterministic services) mathematical proof of dishonesty. The expected cost of lying exceeds the expected benefit (one free service execution) for any rational actor. Formally, this satisfies the incentive compatibility constraint from mechanism design theory (Myerson, 1981).
+5. **For deterministic services:** Re-execution produces matching output hash → client's claim is provably false. Automatic resolution. Funded by insurance pool (§6.1).
 
 ### 3.4 Dishonest Node (Claim and Run)
 
 **Attack:** Node claims ERG and either never executes or delivers garbage output.
 
-**Why it's dangerous:** The node captures immediate payment. The only deterrent is reputation loss.
+**Defense — Delivery Bond + Reputation as collateral:**
 
-**Defense — Reputation as economic collateral:**
+1. **Delivery bond (Contract 6):** Node must post a bond (5% of task value) when claiming. Bond is forfeited to client if node doesn't deliver. This creates immediate economic cost for non-execution — no need to wait for reputation effects.
 
-1. **Tiered task access:** Your max claimable task value is a function of your reputation tier. A Tier 3 node can claim up to 10 ERG tasks. To reach Tier 3 required months of genuine work through Tiers 0-2. Cheating on one 10 ERG task destroys that entire investment.
+2. **Tiered task access with value-based progression:** Reaching Tier 3 requires 10 ERG cumulative transacted + 5000 blocks active. Cheating on one task destroys that investment.
 
-2. **Exponential rebuild cost:** Reputation lost from a negative rating at Tier k costs exponentially more to rebuild than it took to earn, because the node drops tiers and must re-climb.
-
-   ```
-   Tier structure:
-   Tier 0 (New):     max 0.01 ERG   — entry
-   Tier 1 (Novice):  max 0.1 ERG    — after 10 successful Tier 0 tasks
-   Tier 2 (Skilled): max 1 ERG      — after 10 successful Tier 1 tasks
-   Tier 3 (Expert):  max 10 ERG     — after 20 successful Tier 2 tasks
-   Tier 4 (Elite):   max 100 ERG    — after 50 successful Tier 3 tasks
-   
-   Cost to reach Tier 3: ~40 genuine tasks across months
-   Gain from cheating once: ≤ 10 ERG
-   Loss from cheating: back to Tier 1, months to recover
-   ```
-
-3. **Time-locked reputation vesting:** Reputation from a completed task vests over 100 blocks (~3 hours). During vesting, a dispute can claw it back. Prevents hit-and-run.
-
-**Why it works:** At every tier, the cumulative investment in reputation exceeds the maximum single-task gain. The ratio improves as tiers increase. A Tier 4 node with 100 ERG max task capacity has invested in completing 90+ tasks across all lower tiers — the opportunity cost of that history far exceeds 100 ERG.
+3. **Time-locked reputation vesting:** Reputation from a completed task vests over 100 blocks (~3 hours). During vesting, a dispute can claw it back.
 
 ### 3.5 Front-Running (MEV)
 
-**Attack:** A miner or observer sees a node's claim transaction in the mempool and submits their own claim first with a higher fee. (Or: a node watches for lucrative service requests and front-runs other nodes' claims.)
+**Attack:** A miner or observer sees a node's claim transaction in the mempool and submits their own claim first.
 
-**Why it's dangerous:** Undermines fair node selection. Higher-fee payers win regardless of reputation.
+**Defense — Weighted random selection eliminates front-running incentive:**
 
-**Defense — Reputation-locked claiming:**
+1. **Reputation-proportional randomness:** The winner is determined by verifiable randomness from the block header, not by who submits first. Front-running a claim tx is pointless — you can't change your probability of winning.
 
-1. **Deadline-based selection, not first-come:** The contract doesn't award to the first claimer. Instead, after deadline T, there's a claim window (e.g., 10 blocks). During this window, any qualifying node can submit a claim. The contract selects the highest-reputation claimant, not the first.
+2. **Claim window + random selection:** During the claim window, nodes register intent. After the window closes, the next block header provides the randomness seed. No one can predict or manipulate the selection before the block is mined.
 
-2. **Commit-claim pattern:** Nodes submit a commitment (hash of their claim + secret) during the claim window, then reveal in the next phase. This prevents front-running because the claim contents are hidden until the reveal phase.
-
-3. **Ergo's UTXO model advantage:** Unlike Ethereum's account model, Ergo's eUTXO model is inherently more resistant to MEV because transactions specify exact inputs. There's no global state manipulation — a transaction either spends a specific box or fails.
-
-**Why it works:** The combination of reputation-based selection (not fee-based) and commit-reveal claiming makes front-running ineffective. Even if a miner sees your claim, they can't claim instead unless they have higher reputation.
+3. **Ergo's UTXO model advantage:** Transactions specify exact inputs. No global state manipulation — a transaction either spends a specific box or fails.
 
 ### 3.6 Reputation Farming
 
-**Attack:** Build reputation cheaply on many micro-tasks (0.01 ERG each), then exploit it on one high-value task.
+**Attack:** Build reputation cheaply on many micro-tasks, then exploit it on one high-value task.
 
-**Why it's dangerous:** If reputation from micro-tasks translates directly to high-value task access, the cost of reputation is artificially low.
+**Defense — Value-weighted tiers with time gates:**
 
-**Defense — Value-weighted reputation with tier gates:**
+1. **Cumulative value transacted:** Tier progression requires actual ERG value, not task count. 1000 micro-tasks at 0.001 ERG = 1 ERG cumulative — the same as 1 task at 1 ERG. No shortcut via micro-task spam.
 
-1. **Tier isolation:** Reputation earned at Tier k ONLY qualifies you for Tier k+1. You cannot skip tiers. 100 Tier 0 tasks do not give you Tier 3 access — you must complete tasks at each intermediate tier.
+2. **Time gates:** Minimum blocks between tier promotions prevent speed-running.
 
-2. **Value-weighted contribution:** The reputation weight of a task is proportional to its ERG value:
-
+3. **Tier structure (value + time based):**
    ```
-   rep_earned = base_rep × log(1 + task_value / base_value)
+   Tier 0 (Open):    max 0.01 ERG  — no requirements (anyone)
+   Tier 1 (Novice):  max 0.1 ERG   — 0.1 ERG cumulative + 500 blocks active
+   Tier 2 (Skilled): max 1 ERG     — 1 ERG cumulative + 2000 blocks active
+   Tier 3 (Expert):  max 10 ERG    — 10 ERG cumulative + 5000 blocks active
+   Tier 4 (Elite):   max 100 ERG   — 100 ERG cumulative + 15000 blocks active
    ```
 
-   This means 1000 micro-tasks at 0.01 ERG contribute far less total reputation than 10 tasks at 1 ERG.
-
-3. **Time gates:** Minimum time between tier promotions (e.g., 1000 blocks ≈ ~33 hours per tier). Prevents speed-running through tiers.
-
-**Why it works:** The tier system creates a monotonically increasing cost function for reputation. There is no shortcut. The cost to reach Tier k is at least the sum of costs at all tiers below k, plus minimum time delays.
+4. **Why this resists micro-task farming:** To reach Tier 2, you need 1 ERG cumulative regardless of how many tasks that takes. The 1% fee means you paid 0.01 ERG to the platform along the way. Time gates add a minimum ~3 days. No volume of 0.001 ERG tasks gets you there faster than the economic reality allows.
 
 ### 3.7 Eclipse Attacks
 
-**Attack:** Isolate a node from seeing service requests by controlling its network peers. The node misses profitable tasks and/or receives manipulated information.
-
-**Why it's dangerous:** If a node can't see legitimate requests, it can't earn. Worse, the attacker could feed fake requests to waste the node's resources.
+**Attack:** Isolate a node from seeing service requests by controlling its network peers.
 
 **Defense:**
 
-1. **On-chain requests (primary):** Service requests are Ergo UTXO boxes. They're visible to anyone running an Ergo node or using the Explorer API. Eclipse attacks on the Ergo P2P layer don't affect what's on the blockchain — only the speed of propagation.
+1. **On-chain requests:** Service requests are Ergo UTXO boxes — visible to anyone running an Ergo node. Eclipse attacks on P2P only delay visibility, not prevent it.
 
-2. **Multiple data sources:** Nodes should query multiple Ergo nodes and Explorer endpoints. A node eclipsed on one connection can still see the chain through others.
+2. **Multiple data sources:** Nodes should query multiple Ergo nodes and Explorer endpoints.
 
-3. **Celaut peer diversity:** Nodo's peer discovery should connect to diverse network segments. Josemi — **does Nodo already have peer diversity mechanisms?** This is an area where your expertise matters.
+3. **Claim window margin:** The claim window ensures temporary delays don't cause missed opportunities.
 
-**Why it works:** Because service requests are on-chain (not in an off-chain order book), eclipse attacks can only delay visibility, not prevent it. The claim window after the deadline ensures that temporary delays don't cause nodes to miss opportunities.
+**Open question for Josemi:** Does Nodo already have peer diversity mechanisms?
 
 ### 3.8 Griefing
 
-**Attack:** Lock ERG with impossible parameters (e.g., service hash that doesn't exist, or min reputation higher than any node has) to waste node resources evaluating the request.
-
-**Why it's dangerous:** Nodes spend compute time scanning and evaluating requests that can never be fulfilled.
+**Attack:** Lock ERG with impossible parameters to waste node resources evaluating the request.
 
 **Defense:**
 
-1. **Minimum task value:** Enforced by the contract. Each service request must contain at least MIN_ERG (e.g., 0.001 ERG). Spam is expensive.
-
-2. **Client reputation gating:** Low-reputation clients have rate limits on task creation (enforced off-chain by node filtering, not on-chain to avoid censorship).
-
-3. **Ergo transaction fees:** Every on-chain request costs the griefer real ERG in mining fees. At scale, griefing becomes expensive.
-
-4. **Lazy evaluation by nodes:** Nodes can filter requests client-side: skip unknown service hashes, skip requests with unreasonable parameters. The on-chain cost is borne by the griefer; nodes spend minimal resources filtering.
-
-**Why it works:** The cost of griefing scales linearly with the number of spam requests (minimum ERG + tx fees per request), while the cost to nodes of filtering scales sublinearly (simple hash lookup). At any scale, the griefer pays more than the damage caused.
+1. **Minimum task value** enforced by contract (MIN_ERG ≈ 0.001 ERG).
+2. **Ergo transaction fees** make spam expensive.
+3. **Lazy evaluation:** Nodes filter client-side — skip unknown service hashes, skip unreasonable parameters. Cost to griefer scales linearly; cost to nodes scales sublinearly.
 
 ### 3.9 Race Conditions
 
-**Attack:** Multiple nodes try to claim the same job simultaneously, causing transaction conflicts and wasted fees for losing claimants.
+**Attack:** Multiple nodes try to claim the same job simultaneously.
 
-**Why it's dangerous:** In a naive first-come-first-served model, losing claimants waste transaction fees. High-traffic could cause frequent conflicts.
+**Defense — Weighted random selection eliminates races:**
 
-**Defense:**
-
-1. **Claim window + reputation selection:** Instead of racing, all qualifying nodes submit claims during a defined window. The contract resolves to the highest-reputation claimant. Losing claimants' transactions are simply invalid (the box was already spent) — in Ergo's UTXO model, this is a clean failure with no gas cost (unlike Ethereum's account model).
-
-2. **Off-chain coordination (optional optimization):** Nodes could use Celaut's peer network to informally signal intent. If a Tier 4 node signals it will claim, lower-tier nodes know not to bother. This is optional and doesn't affect security — just efficiency.
-
-**Why it works:** Ergo's UTXO model means failed transactions cost nothing (the transaction simply doesn't get included). This eliminates the economic damage of race conditions. The claim window + reputation selection makes the outcome deterministic given the set of claimants.
+With the weighted random mechanism, there is no race. All qualifying nodes register during the claim window. Selection is deterministic given the randomness seed. There's exactly one winner per task. Failed claim transactions in Ergo's UTXO model cost nothing (tx simply not included).
 
 ### 3.10 Time Manipulation
 
-**Attack:** A miner manipulates block timestamps to game deadline conditions — either making a deadline appear passed (to allow early claiming) or not yet reached (to delay claiming).
-
-**Why it's dangerous:** If a colluding miner can shift perceived time, they could front-run deadlines.
+**Attack:** A miner manipulates block timestamps to game deadline conditions.
 
 **Defense:**
 
-1. **Use block HEIGHT, not timestamp:** All deadlines in our contracts reference block height, not wall-clock time. Block height is monotonically increasing and consensus-validated. Miners cannot forge block heights.
+1. **Use block HEIGHT, not timestamp.** Block height is monotonically increasing and consensus-validated. Miners cannot forge block heights.
 
-2. **Reasonable deadline margins:** Deadlines should have sufficient margin (e.g., minimum 60 blocks ≈ 2 hours) to make single-block manipulation irrelevant.
-
-**Why it works:** Block height is a consensus-level invariant in Ergo. No single miner can manipulate it. This is a direct advantage of using HEIGHT over TIMESTAMP in ErgoScript.
+2. **Reasonable deadline margins** (minimum 60 blocks ≈ 2 hours).
 
 ### 3.11 Reputation Laundering
 
-**Attack:** Build reputation on Address A, then somehow transfer that reputation's benefits to Address B (e.g., by having A always claim jobs and subcontract to B).
-
-**Why it's dangerous:** If reputation is transferable (even indirectly), the reputation market reduces to "reputation for sale" — destroying its integrity.
+**Attack:** Build reputation on Address A, transfer benefits to Address B.
 
 **Defense:**
 
-1. **Soulbound EGO tokens:** The contract enforces that EGO boxes can only be recreated at the same owner address. You cannot send your reputation to another address.
-
-2. **Execution address binding:** The claiming node's address must match the EGO token owner. You can't claim with A's reputation and have B execute.
-
-3. **Subcontracting detection:** If A consistently claims and then makes payments to B (detectable on-chain), A's diversity score drops (always interacting with B) and the pattern is flagged.
-
-**Why it works:** Soulbound tokens are contract-enforced, not policy-enforced. The spending condition mathematically prevents transfer. Even indirect laundering through subcontracting is economically costly (1% fee each hop) and detectable through on-chain graph analysis.
+1. **Soulbound EGO tokens:** Contract enforces EGO boxes can only be recreated at the same owner address.
+2. **Execution address binding:** Claiming node's address must match EGO token owner.
+3. **Subcontracting detection:** Consistent A→B payments trigger diversity score reduction.
 
 ### 3.12 Free-Riding
 
-**Attack:** Benefiting from the network without contributing — e.g., running a node that only claims high-value tasks and ignores low-value ones, or a client who benefits from the reputation system without ever rating.
-
-**Why it's dangerous:** If participants can extract value without maintaining the system, the system degrades.
+**Attack:** Benefit from the network without contributing (e.g., never rating, only taking high-value tasks).
 
 **Defense:**
 
-1. **Rating is mandatory for reputation update:** Both parties must participate in the commit-reveal rating for either to receive reputation credit. Skip rating → no reputation update → your tier stagnates.
+1. **Rating required for reputation update:** Both parties must participate in rating for either to receive credit.
+2. **Activity-based reputation decay:** 1% decay per DECAY_PERIOD blocks without activity. Passive participants lose tier status. Decay can be triggered by anyone (incentivized — see Contract 2).
+3. **Value-based tiers:** You can't skip lower tiers. Natural incentive to participate at all levels.
 
-2. **Activity-based reputation decay:** Reputation decays 1% per epoch (configurable, e.g., 10,000 blocks ≈ 2 weeks) without activity. Passive participants gradually lose tier status.
+### 3.13 Miner Randomness Manipulation
 
-3. **Node incentive alignment:** Nodes that refuse all low-value tasks miss the opportunity to climb tiers. The tier system naturally incentivizes participation at all levels.
+**Attack:** A miner who is also a node could manipulate the block header to win task selection, since the randomness comes from the block they mine.
 
-**Why it works:** The decay function ensures that reputation is a flow, not a stock. You must continually contribute to maintain your position. This converts free-riding from a viable strategy to a strategy with guaranteed decline.
+**Defense:**
+
+1. **Multi-block randomness:** Instead of a single block header, use `hash(header[T+W+1] || header[T+W+2])` — the XOR or hash of two consecutive block headers. A miner would need to control two consecutive blocks to manipulate selection, which is extremely unlikely.
+
+2. **Economic analysis:** Even if a miner controls one block, they can only bias selection for tasks in that specific claim window. The expected value of winning one additional task (minus the opportunity cost of potentially mining a suboptimal block) makes this attack unprofitable for all but the most valuable tasks.
+
+3. **For high-value tasks (Tier 3+):** Use a longer randomness window (3+ block headers) to make manipulation impractical.
 
 ---
 
@@ -570,12 +682,12 @@ Where for each completed task i:
 | ratingᵢ | ∈ {-1, 0, +1} | Counterparty's revealed rating |
 | value_weightᵢ | log(1 + Vᵢ / V_base) | Higher-value tasks count more |
 | diversity_factorᵢ | 1 / count(same_counterparty) | Repeated pairs dampened |
-| freshness_factorᵢ | λ^(H_current - Hᵢ) | Older ratings decay (λ ≈ 0.9999 per block) |
+| freshness_factorᵢ | λ^(H_current - Hᵢ) | Older ratings decay (λ ≈ 0.9999/block) |
 | dampening_factorᵢ | min(1, outlier_check) | Extreme raters dampened |
 
 ### 4.2 Bilateral Ratings Create Nash Equilibrium
 
-Both parties rate each other. This creates a bilateral reputation game:
+Both parties rate each other. Honest rating is a weakly dominant strategy:
 
 ```
                     Node Rates Honestly    Node Rates Dishonestly
@@ -589,31 +701,34 @@ Dishonestly      │   +rep)             │   -rep - stake)         │
                  └─────────────────────┴─────────────────────────┘
 ```
 
-**Nash equilibrium analysis:** Honest rating is a weakly dominant strategy for both parties. Regardless of what the other party does, honest rating either:
-- Yields the best outcome (both honest → mutual reputation gain)
-- Avoids the stake loss that comes with dishonest rating
-- Benefits from the other party's dishonesty penalty
+This is a **Prisoner's Dilemma with punishment** — the commit-reveal mechanism prevents the coordination needed to sustain mutual dishonesty.
 
-This is structurally similar to a **Prisoner's Dilemma with punishment** — and the commit-reveal mechanism prevents the coordination needed to sustain mutual dishonesty.
-
-### 4.3 Commit-Reveal Scheme
+### 4.3 Batched Commit-Reveal Scheme
 
 ```
-Phase 1: COMMIT (within N blocks of task completion)
-  Client submits: hash(rating_C || salt_C)
-  Node submits:   hash(rating_N || salt_N)
-  
-Phase 2: REVEAL (within M blocks of last commit)
-  Client reveals: (rating_C, salt_C)  → contract verifies hash
-  Node reveals:   (rating_N, salt_N)  → contract verifies hash
-  
-Phase 3: RESOLUTION
-  Both revealed: Apply both ratings to respective EGO boxes
-  Only one revealed: Apply revealer's rating; non-revealer gets penalty
-  Neither revealed: Both get small penalty; task counts but no rating
+Off-Chain Phase (per task):
+  1. Task completes
+  2. Client creates: sig_C = Sign(clientKey, taskId || hash(rating_C || salt_C))
+  3. Node creates:   sig_N = Sign(nodeKey, taskId || hash(rating_N || salt_N))
+  4. Both exchange signed commitments via P2P
+  5. After exchange, both reveal ratings + salts to each other off-chain
+  6. Both store the full (commitment, reveal) tuple for batch submission
+
+On-Chain Settlement (batched, every ~100 blocks):
+  Anyone can submit a batch settlement transaction containing:
+  - N (commitment, reveal) pairs with valid signatures
+  - Updates to all affected EGO boxes
+  - Contract verifies all hashes and signatures in one tx
+
+Fallback (non-cooperation):
+  If counterparty refuses to exchange commitments:
+  - Submit single on-chain commit (1 tx)
+  - Reveal after N blocks (1 tx)  
+  - Non-cooperating party gets neutral rating + penalty
+  - Cost: 2 tx instead of amortized batch cost
 ```
 
-**Why sealed-bid style works:** From auction theory (Vickrey 1961, extended by Myerson 1981), sealed-bid mechanisms prevent strategic behavior when participants can't observe each other's actions before committing. The commit-reveal pattern is the blockchain equivalent of sealed envelopes.
+**Why sealed-bid style works:** From auction theory (Vickrey 1961, extended by Myerson 1981), sealed-bid mechanisms prevent strategic behavior when participants can't observe each other's actions before committing.
 
 ### 4.4 Reputation Decay Function
 
@@ -627,11 +742,11 @@ Where:
 
 **Properties:**
 - Half-life: ~6,930 blocks ≈ ~10 days of inactivity
-- After 30 days inactive: ~87% of original reputation remains
-- After 90 days inactive: ~66% remains
-- After 1 year inactive: ~3% remains
+- After 30 days: ~87% remains
+- After 90 days: ~66% remains
+- After 1 year: ~3% remains
 
-This prevents "rest-and-vest" — building reputation and sitting on it indefinitely.
+**Decay triggering:** Anyone can trigger decay on any inactive EGO box. The triggerer pays the tx fee but receives DECAY_REWARD from the box (see Contract 2). This creates an incentivized maintenance layer — bots can profitably keep the reputation graph clean.
 
 ### 4.5 Stake-Weighted Ratings
 
@@ -639,24 +754,47 @@ This prevents "rest-and-vest" — building reputation and sitting on it indefini
 rating_impact = base_impact × log(1 + task_value / 0.01)
 
 Examples:
-  0.01 ERG task: impact = base × log(2) ≈ 0.69 × base
-  0.1 ERG task:  impact = base × log(11) ≈ 2.4 × base
-  1 ERG task:    impact = base × log(101) ≈ 4.6 × base
-  10 ERG task:   impact = base × log(1001) ≈ 6.9 × base
+  0.01 ERG task: impact ≈ 0.69 × base
+  0.1 ERG task:  impact ≈ 2.4 × base
+  1 ERG task:    impact ≈ 4.6 × base
+  10 ERG task:   impact ≈ 6.9 × base
 ```
 
-The logarithmic scale means high-value tasks count more, but not linearly more. This prevents whales from dominating the reputation system while still recognizing that high-stakes interactions carry more signal.
+Logarithmic scale: high-value tasks count more, but not linearly. Prevents whales from dominating.
 
-### 4.6 Cross-Validation Between Raters
+### 4.6 Tier System — Economic Modeling
 
-For non-deterministic services (where output verification isn't possible):
+Tiers are based on **cumulative value transacted** and **time active**, not task count. This makes micro-task farming economically equivalent to normal participation.
 
-- **5% random duplication:** 5% of tasks are secretly assigned to a second node. Outputs compared algorithmically. Funded from a small insurance pool.
-- **Rater consistency scoring:** Track each address's rating patterns over time. Addresses whose ratings consistently align with cross-validation results are given higher weight. Addresses that diverge are given lower weight.
+```
+Tier 0 (Open):    max 0.01 ERG  — no requirements
+Tier 1 (Novice):  max 0.1 ERG   — 0.1 ERG cumulative + 500 blocks (~17h)
+Tier 2 (Skilled): max 1 ERG     — 1 ERG cumulative + 2000 blocks (~3d)
+Tier 3 (Expert):  max 10 ERG    — 10 ERG cumulative + 5000 blocks (~7d)
+Tier 4 (Elite):   max 100 ERG   — 100 ERG cumulative + 15000 blocks (~21d)
+```
 
-This creates a **proper scoring rule** (Brier 1950) — raters are incentivized to report their true belief because the scoring rule rewards calibration.
+**Why cumulative value, not count:**
+- 1000 tasks × 0.001 ERG = 1 ERG cumulative = same progress as 1 task × 1 ERG
+- No advantage to gaming via micro-transactions
+- Time gates prevent rapid artificial progression even with capital
+- Positive reputation required — negative-rated tasks don't count toward cumulative value
 
-### 4.7 The 6 Anti-Gaming Layers (Refined)
+**On-chain verification:** The EGO box stores cumulative value transacted in R5 and first active block in R9. Tier eligibility is computed as:
+```
+eligible_for_tier(k) = (R5 >= tier_value_threshold[k]) && 
+                       (HEIGHT - R9.first_active >= tier_time_threshold[k]) &&
+                       (effective_rep > 0)  // must have net positive reputation
+```
+
+### 4.7 Cross-Validation Sampling
+
+For non-deterministic services:
+
+- **Random duplication** funded by insurance pool (§6.1). Verification rate adapts to pool balance.
+- **Rater consistency scoring:** Track rating patterns over time. Addresses whose ratings align with cross-validation results get higher weight. This creates a **proper scoring rule** (Brier 1950).
+
+### 4.8 The 6 Anti-Gaming Layers
 
 | Layer | Mechanism | What It Prevents |
 |-------|-----------|-----------------|
@@ -673,85 +811,78 @@ This creates a **proper scoring rule** (Brier 1950) — raters are incentivized 
 
 ### 5.1 Deterministic Services (Celaut's Core Strength)
 
-Celaut's architecture is built around deterministic, containerized services. Same input + same container = same output. This is extremely powerful for verification:
-
 ```
-Verification Flow (Deterministic):
-
+Verification Flow:
 1. Service request specifies: hash(S), input parameters P
 2. Node executes: output O = S(P)
 3. Node publishes: hash(O) on-chain (in the claim transaction)
 4. Verification: ANY observer can re-execute S(P) and check hash(O)
-5. If hash mismatch → node penalized automatically (no dispute needed)
+5. If hash mismatch → node penalized (no dispute needed)
 ```
 
-**This eliminates most attack vectors for deterministic services.** The dishonest node problem (§3.4) and dishonest client problem (§3.3) are both solved by re-execution verification. The cost of verification = the cost of one additional execution.
-
-**Open question for Josemi:** How cheaply can we trigger a verification re-execution on the Celaut network? Is there a mechanism to request "verify this output" that runs the service on a second node and compares hashes? If so, we can make this automatic for a random sample of tasks.
+**Open question for Josemi:** How cheaply can we trigger a verification re-execution on the Celaut network?
 
 ### 5.2 Non-Deterministic Services (LLMs, Creative Work)
 
-For services where same input ≠ same output (e.g., language models, image generation):
+1. **Quality bounds verification:** Even non-deterministic services have quality bounds.
 
-1. **Quality bounds verification:** Even non-deterministic services have quality bounds. A language model should produce grammatical text. An image generator should produce images. Off-chain quality checkers can verify basic output validity.
+2. **Cross-validation sampling:** Random subset of tasks re-executed on a second node. **Funded by the insurance pool** (0.1% of all task payments). Verification rate adapts to pool balance:
+   - Pool > 10 ERG: verify 5% of tasks
+   - Pool 1-10 ERG: verify 2% of tasks
+   - Pool < 1 ERG: verify 0.5% of tasks
 
-2. **Cross-validation sampling (§4.6):** 5% of tasks run on two nodes. Outputs compared for "reasonable similarity" — not identical, but within expected variance.
+3. **Client reputation as proxy:** For subjective quality, the bilateral reputation game provides incentive-compatible rating.
 
-3. **Client reputation as proxy:** For truly subjective quality (was the LLM response helpful?), we rely on the bilateral reputation game. The commit-reveal mechanism + client reputation scoring provides incentive-compatible rating.
-
-4. **Resource commitment proofs:** Per Josemi's insight — the node doesn't know what task it's performing. We CAN verify that the node committed the claimed resources (CPU time, memory, GPU). If a node claims to run a 70B parameter model but only allocates resources for a 7B model, that's verifiable through Celaut's resource tracking.
+4. **Resource commitment proofs:** Per Josemi's insight — verify that the node committed claimed resources (CPU, GPU, memory) through Celaut's resource tracking.
 
 ### 5.3 Timeout and Fallback
 
 ```
 Timeline:
-  Block H₀: Service request created
-  Block T:  Deadline — claim window opens
-  Block T+W: Claim window closes (W ≈ 10 blocks)
-  Block T+W+E: Execution deadline (E ≈ 720 blocks ≈ 24h)
-  Block T+W+E+G: Grace period — client can reclaim (G ≈ 720 blocks)
+  Block H₀:      Service request created
+  Block T:        Deadline — claim window opens
+  Block T+W:      Claim window closes, random selection at T+W+1
+  Block T+W+E:    Execution deadline (E ≈ 720 blocks ≈ 24h)
+  Block T+W+E+R:  Response deadline for delivery bond (R ≈ 720 blocks)
+  Block T+W+E+R+G: Final grace period for reclaim
 
   If no node claims by T+W: Client reclaims ERG
-  If node claims but doesn't deliver by T+W+E: Dispute window opens
-  If no delivery and no dispute by T+W+E+G: Client reclaims remaining ERG
+  If node claims but doesn't deliver by T+W+E: Client flags via bond contract
+  If client doesn't respond by T+W+E+R: Bond returns to node automatically
 ```
 
 ### 5.4 Dispute Resolution Flow
 
 ```
 1. Node delivers output → Client receives it off-chain
-2. Both enter commit-reveal rating
+2. Both enter rating process (off-chain signed commitments)
 3. If client rates negative:
    a. For deterministic services: automatic re-execution check
-      → If output matches: client's negative rating invalidated, client penalized
-      → If output doesn't match: node penalized
-   b. For non-deterministic services: 
-      → Cross-validation triggered (run on second node)
-      → If second node produces "reasonable" output: node vindicated
-      → If dispute unresolvable: insurance pool compensates aggrieved party
-4. Reputation updated based on resolution
+      → Match: client penalized   → Mismatch: node penalized
+   b. For non-deterministic services:
+      → Cross-validation triggered (funded by insurance pool)
+      → If unresolvable: insurance pool compensates aggrieved party
+4. Reputation updated via batched settlement
 ```
 
 ---
 
 ## 6. Economic Model
 
-### 6.1 Why 1% Is Sustainable
+### 6.1 Fee Structure
 
 | Platform | Fee | Our Advantage |
 |----------|-----|---------------|
-| SingularityNET | 20%+ | No backend costs to cover |
+| SingularityNET | 20%+ | No backend costs |
 | Fetch.ai | 15-25% | No centralized infrastructure |
-| Bittensor | Variable (validators) | No validator bottleneck |
+| Bittensor | Variable | No validator bottleneck |
 | **AgenticAiHome** | **1%** | **Static site + blockchain = near-zero overhead** |
 
-The 1% fee is sustainable because our operational costs are approximately zero:
-- No servers (static frontend)
-- No database (Ergo blockchain)
-- No employees (open source + treasury)
-- No cloud bills (nodes run their own hardware)
+**Fee breakdown (the 1% split):**
+- **0.9% → Treasury** (multi-sig, funds development)
+- **0.1% → Insurance Pool** (funds cross-validation and dispute resolution)
 
-The treasury accumulates from volume, not from margins.
+The treasury accumulates from volume, not margins. The insurance pool creates a self-funding verification layer.
 
 ### 6.2 Revenue Flows
 
@@ -760,70 +891,139 @@ For a 10 ERG task:
 
 Client pays:    10 ERG (locked in service request)
                 + gas deposit (to Celaut node, separate)
+Node posts:     0.5 ERG delivery bond (returned on completion)
 
 Node receives:  9.9 ERG (99%)
-Treasury:       0.1 ERG (1%)
+Treasury:       0.09 ERG (0.9%)
+Insurance Pool: 0.01 ERG (0.1%)
+Bond returned:  0.5 ERG (back to node)
 Gas consumed:   Variable (goes to Celaut node operator)
 Gas refund:     Unused gas → back to client
 ```
-
-Node operators also earn gas fees from Celaut. They control their gas pricing. The market ensures competitive pricing — overprice and you lose tasks to cheaper nodes.
 
 ### 6.3 Cost of Attack vs Benefit Analysis
 
 | Attack | Cost to Attacker | Max Benefit | Ratio |
 |--------|------------------|-------------|-------|
-| Sybil (Tier 2) | ≥1.1 ERG + weeks | 1 ERG (one task) | >1:1 |
-| Collusion ring (10 members, Tier 1) | ≥10 ERG in fees + months | 10 ERG (10 tasks) | ~1:1 before penalties |
-| Dishonest client | rating stake + reputation | 1 free task | >2:1 with detection |
-| Dishonest node (Tier 3) | Months of tier-climbing | 10 ERG (one task) | >>1:1 |
-| Reputation farming | linear cost, log returns | — | Diminishing returns |
-| Front-running | Reputation requirement | — | Impossible without rep |
-
-**Key insight:** Every attack has a cost that exceeds or equals the benefit. The system doesn't need to be unhackable — it needs to be unprofitable to hack. This is the same principle behind Bitcoin's proof-of-work security.
+| Sybil (Tier 2) | ≥1 ERG + 3 days | 1 ERG (one task) | ≥1:1 |
+| Collusion ring (10 members) | ≥10 ERG value + weeks | Reputation inflation | Diminishing returns |
+| Dishonest client | rating stake + reputation | 1 free task | >2:1 |
+| Dishonest node | delivery bond + months of tier-climbing | 1 task payment | >>1:1 |
+| Reputation farming | linear cost (value-based) | — | No shortcut |
+| Front-running | — | — | Impossible (random selection) |
+| Miner manipulation | Opportunity cost of suboptimal block | 1 task selection bias | Unprofitable |
 
 ### 6.4 Minimum Viable Stake
-
-For the system to be secure, the minimum stake to participate must satisfy:
 
 ```
 min_stake > max_single_task_value(Tier 0) × expected_fraud_rate
 
-At Tier 0: max_task = 0.01 ERG
-Expected fraud rate: ~10% (generous assumption)
-min_stake > 0.001 ERG
-
-We propose: min_stake = 0.01 ERG (100× the minimum task value)
+At Tier 0: max_task = 0.01 ERG, fraud rate ~10%
+min_stake > 0.001 ERG → we set min_stake = 0.01 ERG
 ```
 
-This is deliberately low to encourage participation while making mass Sybil creation economically painful.
+### 6.5 Storage Rent Management
 
-### 6.5 Positive-Sum Game
+Ergo charges storage rent (~0.00013 ERG per box per 4 years). EGO boxes must persist long-term.
 
-Reputation creates a positive-sum dynamic:
+**Strategy: Initialize with sufficient ERG + top-up mechanism.**
+
+- EGO boxes are created with 0.01 ERG — enough for ~300 years of storage rent at current rates.
+- The `topUpPath` in Contract 2 lets owners add more ERG if needed (future-proofing against rate changes).
+- Active participants naturally refresh their boxes through rating updates (each update recreates the box with current value).
+- Abandoned boxes with decayed reputation eventually get collected by storage rent — this is **desired behavior**, not a bug. Dead identities should be cleaned up.
+
+**Why not insurance pool for rent:** Using the pool for rent creates a subsidy that benefits inactive participants. Better to let each identity bear its own storage cost — it's negligible for active participants and appropriately punitive for abandoned ones.
+
+### 6.6 Positive-Sum Game
 
 1. **Honest nodes** build reputation → access higher-value tasks → earn more
 2. **Honest clients** build reputation → attract better nodes → get better service
-3. **The network** grows → more tasks → more fees → bigger treasury → more development
-4. **Dishonest actors** lose stake, lose reputation, lose access → naturally exit
+3. **The network** grows → more tasks → more fees → bigger treasury + insurance pool
+4. **Dishonest actors** lose bonds, lose reputation, lose access → naturally exit
 
-This is a **virtuous cycle** where honest participation is increasingly rewarded over time, while dishonest participation faces increasing costs. Game-theoretically, this is an **evolutionary stable strategy** (Maynard Smith, 1982) — honest behavior cannot be invaded by a small number of dishonest mutants.
+This is an **evolutionary stable strategy** (Maynard Smith, 1982) — honest behavior cannot be invaded by a small number of dishonest mutants.
 
 ---
 
-## 7. Implementation Roadmap
+## 7. Indexer Architecture
+
+### The Decentralization Requirement
+
+Reputation scores must be independently verifiable without trusting any single party. The core claim mechanism uses **data inputs** to reference EGO boxes directly on-chain — no indexer needed for contract execution.
+
+### What Indexers Do (and Don't Do)
+
+**Indexers are NOT needed for:**
+- Node selection (contracts reference EGO boxes via data inputs)
+- Payment resolution (pure on-chain)
+- Bond mechanics (pure on-chain)
+- Rating settlement (pure on-chain)
+
+**Indexers ARE needed for:**
+- UI: displaying leaderboards, search, service discovery
+- Analytics: network statistics, health monitoring
+- Convenience: aggregating reputation history for display
+
+### Multi-Indexer Design
+
+```
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│  Indexer A   │  │  Indexer B   │  │  Indexer C   │
+│  (AIH team)  │  │  (Community) │  │  (Josemi)    │
+│              │  │              │  │              │
+│  Scans Ergo  │  │  Scans Ergo  │  │  Scans Ergo  │
+│  blockchain  │  │  blockchain  │  │  blockchain  │
+│              │  │              │  │              │
+│  Computes    │  │  Computes    │  │  Computes    │
+│  reputation  │  │  reputation  │  │  reputation  │
+│  scores      │  │  scores      │  │  scores      │
+└──────┬───────┘  └──────┬───────┘  └──────┬───────┘
+       │                 │                 │
+       ▼                 ▼                 ▼
+   All three MUST produce identical results
+   (same chain data → same deterministic computation)
+   Discrepancies indicate a bug or malicious indexer
+```
+
+**Key properties:**
+
+1. **Deterministic computation:** Given the same blockchain state, every indexer MUST compute identical reputation scores. The reputation formula (§4.1) is fully deterministic — no external data or randomness.
+
+2. **Independent operation:** Each indexer scans Ergo independently. No communication between indexers needed. Any disagreement is immediately detectable by comparing outputs.
+
+3. **Permissionless:** Anyone can run an indexer. The computation requires only an Ergo node (or Explorer API access) and the published reputation formula.
+
+4. **Client-side verification:** The static frontend can query multiple indexers and alert the user if results disagree. For critical operations (large task claims), the client can verify the reputation score themselves by scanning the relevant EGO boxes.
+
+5. **No consensus needed:** Indexers don't vote or agree — they independently compute the same deterministic function. If they disagree, at least one has a bug. The chain is the source of truth.
+
+### Indexer API (Standardized)
+
+```
+GET /reputation/{address}     → { score, tier, cumulative_value, last_active }
+GET /leaderboard?tier={k}     → [{ address, score, tier }]
+GET /service/{hash}/providers → [{ address, score, tier, gas_price }]
+GET /health                   → { block_height, total_egos, total_tasks }
+```
+
+Any indexer implementing this API is compatible with the AIH frontend. Users can switch indexers or run their own.
+
+---
+
+## 8. Implementation Roadmap
 
 ### Phase 1: Core Contracts (Weeks 1-4)
 
 **Deliverables:**
-- [ ] Service Request Box contract — deployed to Ergo testnet
-- [ ] EGO Reputation Box contract — deployed to Ergo testnet
-- [ ] Payment Resolution contract — deployed to Ergo testnet
-- [ ] Treasury Multi-sig — deployed to Ergo testnet
-- [ ] Basic claim flow: create request → node claims → payment resolves
+- [ ] Service Request Box contract (with weighted random selection) — testnet
+- [ ] EGO Reputation Box contract (with decay + top-up) — testnet
+- [ ] Delivery Bond contract — testnet
+- [ ] Payment Resolution contract (with 0.9%/0.1% split) — testnet
+- [ ] Treasury Multi-sig — testnet
+- [ ] Insurance Pool Box — testnet
+- [ ] Basic claim flow: create → select → bond → execute → settle
 - [ ] Unit tests for all spending conditions
-
-**What we can test:** The basic economic loop. Client locks ERG, node claims after deadline, payment splits. No reputation yet — just the payment infrastructure.
 
 **Dependency on Josemi:** We need to agree on the register layouts (§2). Does the proposed structure work with Celaut's existing Ergo payment system?
 
@@ -831,89 +1031,83 @@ This is a **virtuous cycle** where honest participation is increasingly rewarded
 
 **Deliverables:**
 - [ ] EGO token minting contract
-- [ ] Commit-reveal rating contract
-- [ ] Reputation query API (off-chain indexer reading Ergo boxes)
+- [ ] Batched rating settlement contract
+- [ ] Reputation indexer (reference implementation, open source)
 - [ ] AIH frontend integration: view reputation, submit ratings
-- [ ] Tier system implementation
-- [ ] Bootstrap mechanism for initial reputation
+- [ ] Tier system implementation (value + time based)
 
-**The cold-start problem:** With zero reputation data, no node can claim any task (nobody meets the minimum reputation threshold). Solutions:
+**The cold-start solution:** No genesis reputation needed. Tier 0 requires NO reputation — anyone can claim Tier 0 tasks immediately. Both parties know the node is unreputed. Reputation builds organically:
 
-1. **Genesis reputation:** Mint initial EGO tokens for early participants (Josemi's existing Celaut node operators, AIH team, early community members). Manual, one-time process.
-2. **Tier 0 has no minimum:** Anyone can claim Tier 0 tasks (no reputation required). This is the entry point.
-3. **Gradual minimum increase:** Start with min_reputation = 0 for all tasks, gradually increase over 3 months as the network builds reputation history.
+```
+Day 1:  Node joins. Reputation = 0. Can claim Tier 0 tasks (max 0.01 ERG).
+Day 2:  Completes 10 Tier 0 tasks. Cumulative value = 0.1 ERG.
+        After 500 blocks active → eligible for Tier 1.
+Week 2: Completes Tier 1 tasks. Cumulative value reaches 1 ERG.
+        After 2000 blocks active → eligible for Tier 2.
+...and so on organically.
+```
+
+No manual minting. No privileged genesis participants. No admin keys. Fully permissionless from block 0.
 
 ### Phase 3: Full Celaut Integration (Weeks 9-16)
 
 **Deliverables:**
 - [ ] End-to-end flow: AIH request → Celaut execution → on-chain settlement
 - [ ] Gas deposit bridge (AIH escrow → Celaut gas payment)
-- [ ] Service hash discovery (browsing available Celaut services from AIH)
+- [ ] Service hash discovery (browsing available Celaut services)
 - [ ] Output hash publication on-chain
-- [ ] Deterministic verification (re-execution check)
+- [ ] Deterministic verification (re-execution check via insurance pool)
+- [ ] Second indexer deployment (community or Josemi-operated)
 - [ ] Mainnet deployment
 
-**Dependency on Josemi:** This phase requires close collaboration. We need:
-- A running Nodo testnet instance
-- Understanding of how to map AIH service requests to Celaut service execution
-- Gas pricing integration (how does the client's ERG payment relate to gas consumed?)
+**Dependency on Josemi:** Close collaboration needed — running Nodo testnet, gas pricing integration, service mapping.
 
 ### Phase 4: Advanced Features (Months 4-12)
 
-**Deliverables (prioritized backlog):**
 - [ ] Cross-validation sampling for non-deterministic services
-- [ ] Insurance pool contract
 - [ ] Graph analysis for collusion detection
-- [ ] Private bidding (nodes bid in sealed envelopes for task execution)
-- [ ] Sigma protocol integration (ZK proofs for private reputation thresholds — proving "my reputation ≥ R" without revealing exact score)
-- [ ] Cross-chain bridges (if demand exists)
-- [ ] Reputation portability via Ergo data inputs
+- [ ] Private bidding (sealed envelopes for task execution)
+- [ ] Sigma protocol integration (ZK proofs for private reputation — proving "rep ≥ R" without revealing exact score)
+- [ ] Cross-chain bridges (if demand)
 - [ ] Advanced dispute resolution with multi-party arbitration
 
-**Sigma protocol opportunity:** Ergo's native sigma protocols enable zero-knowledge proofs. A node could prove "I have reputation ≥ R" without revealing their exact score or identity. This preserves privacy while maintaining the reputation-gating mechanism. This is a significant differentiator — no other decentralized AI platform offers ZK-reputation.
+**Sigma protocol opportunity:** Ergo's native sigma protocols enable zero-knowledge proofs. A node could prove "I have reputation ≥ R" without revealing their exact score. This is a significant differentiator — no other decentralized AI platform offers ZK-reputation.
 
 ---
 
-## 8. Open Questions for Josemi
-
-We genuinely need your expertise on these. Not rhetorical — these will shape the architecture.
+## 9. Open Questions for Josemi
 
 ### Architecture Questions
 
-**Q1: Deterministic verification cost.** In Celaut's architecture, how cheaply can we trigger a re-execution of a service for verification? Can a node request "run service S with inputs P and return hash(output)" without the full overhead of a paid task? If verification is cheap, it transforms our security model — most attack vectors become provably solvable.
+**Q1: Deterministic verification cost.** How cheaply can we trigger a re-execution for verification? If verification is cheap, most attack vectors become provably solvable.
 
-**Q2: Resource commitment proofs.** Does Nodo already track how many resources (CPU, GPU, memory, time) a service instance consumed? Can we read this data programmatically? This would let us verify "the node actually ran a 70B model, not a 7B model" — crucial for non-deterministic services.
+**Q2: Resource commitment proofs.** Does Nodo track resource consumption (CPU, GPU, memory, time) programmatically? Crucial for non-deterministic service verification.
 
-**Q3: Service versioning.** When a service is updated, does it get a new hash? Is hash(service) = hash(container binary)? If yes, versioning is automatic and clean. If no, how do we handle updates?
+**Q3: Service versioning.** When a service is updated, does it get a new hash? Is hash(service) = hash(container binary)?
 
-**Q4: Gas ↔ ERG bridging.** The client pays ERG in the service request box. The Celaut node consumes gas. How do we bridge these? Options:
-- Client pays gas deposit separately (current proposal in partnership doc)
-- Service request box includes gas allocation (single transaction)
-- Node pays gas upfront, recoups from the service payment
-
-Which aligns best with Celaut's existing payment model?
+**Q4: Gas ↔ ERG bridging.** Which aligns best with Celaut's existing payment model: separate gas deposit, combined in service request box, or node-fronted gas?
 
 ### Game Theory Questions
 
-**Q5: Your gas model and reputation.** In your vision, nodes set their own gas prices and reputation gates access to tasks. How do you see the interaction between gas pricing and reputation? Should higher-reputation nodes be able to charge more? Or should reputation only gate access, not price?
+**Q5: Gas pricing and reputation.** Should higher-reputation nodes charge more, or should reputation only gate access?
 
-**Q6: The claim mechanism.** Our proposal uses "highest reputation above threshold R claims after deadline T." Your original design also had the highest-reputation node claim. Do you see issues with this? Should we consider weighted random selection (proportional to reputation) instead of winner-take-all?
+**Q6: Weighted random selection.** We've replaced "highest rep wins" with probability-proportional selection (P = rep_i / Σrep). Do you see issues? The math prevents monopoly while still rewarding reputation.
 
-**Q7: Commit-reveal on eUTXO.** The two-phase commit-reveal pattern requires two on-chain transactions per rating. Do you see any eUTXO constraints that make this awkward? We've seen multi-stage box patterns in Ergo (SigmaUSD, ErgoDEX), but we'd value your experience with Ergo's transaction model.
+**Q7: Batched ratings.** The off-chain commit + batched settlement pattern reduces per-task cost from ~0.004 ERG to ~0.0001 ERG. Does this work with Ergo's multi-input transaction limits?
 
 ### Implementation Questions
 
-**Q8: Testnet Nodo.** Can we get a test Nodo instance running for integration testing? What's the minimum hardware requirement?
+**Q8: Testnet Nodo.** Can we get a test instance for integration testing?
 
-**Q9: Service packaging.** We have a TypeScript agent packager that converts AIH agent specs to Celaut service specs (based on your proto definitions). Can we test this against a real Nodo instance to validate the mapping?
+**Q9: Service packaging.** Can we test our TypeScript agent packager against a real Nodo instance?
 
-**Q10: Multi-sig treasury.** Would you be a signer on the 2-of-3 multi-sig treasury? The contract is compiled and tested. We propose: Cheese (AIH), Josemi (Celaut), Community Advisor (TBD from Ergo ecosystem).
+**Q10: Multi-sig treasury.** Would you be a signer? Proposed: Cheese (AIH), Josemi (Celaut), Community Advisor (TBD).
 
 ### Philosophical Questions
 
-**Q11: How decentralized is decentralized enough?** The AIH frontend is a static site — anyone can host it. The contracts are on Ergo — immutable. The execution is on Celaut — permissionless. But the reputation computation involves off-chain indexing. How do we ensure the reputation indexer doesn't become a centralization point? Should multiple indexers exist with consensus?
+**Q11: How decentralized is decentralized enough?** With the multi-indexer architecture (§7), indexers are now fully permissionless and verifiable. The only remaining centralization point is the treasury multi-sig — and even that is 2-of-3 with diverse signers. Is this sufficient?
 
-**Q12: Your biggest concern.** What attack vector keeps you up at night? We've analyzed 12 here, but you know the execution layer better than anyone. What have we missed?
+**Q12: Your biggest concern.** What attack vector keeps you up at night? We've analyzed 13 here (including miner randomness manipulation), but you know the execution layer better. What have we missed?
 
 ---
 
@@ -930,6 +1124,7 @@ Which aligns best with Celaut's existing payment model?
 | Nash equilibrium | Nash (1950) | Bilateral rating game |
 | VCG mechanism | Vickrey-Clarke-Groves | Future: private bidding |
 | Zero-knowledge proofs | Goldwasser et al. (1985) | Sigma protocol reputation |
+| Proportional selection | Kiayias et al. (2017) | Weighted random node selection |
 
 ## Appendix B: ErgoScript Registers Quick Reference
 
@@ -947,13 +1142,17 @@ Every Ergo box has mandatory registers R0-R3 and optional R4-R9:
 
 | Term | Meaning |
 |------|---------|
-| **Service Hash** | SHA-256 hash identifying a Celaut service (container binary). Nodes are interchangeable — any node can execute any service. |
-| **EGO Token** | Soulbound reputation token on Ergo. Cannot be transferred. Tracks cumulative reputation score. |
-| **Gas Model** | Josemi's term: nodes price compute resources, clients pay proportionally. Market-driven pricing. |
-| **Reputation-Gated Execution** | Only nodes with sufficient reputation can claim tasks. Higher reputation = access to higher-value tasks. |
-| **Nodo** | Celaut's node software. Handles service execution, peer discovery, load balancing, dependency management. |
-| **Commit-Reveal** | Two-phase protocol where participants commit to a value (via hash), then reveal. Prevents strategic behavior. |
-| **Data Input** | Ergo eUTXO feature: reference a box for its data without spending it. Used to verify reputation without consuming the EGO box. |
+| **Service Hash** | SHA-256 hash identifying a Celaut service (container binary). Nodes are interchangeable. |
+| **EGO Token** | Soulbound reputation token on Ergo. Cannot be transferred. Tracks cumulative reputation. |
+| **Gas Model** | Josemi's term: nodes price compute resources, clients pay proportionally. Market-driven. |
+| **Delivery Bond** | ERG deposit posted by node when claiming a task. Returned on delivery, forfeited on non-delivery. |
+| **Insurance Pool** | On-chain pool funded by 0.1% of task payments. Funds cross-validation and dispute resolution. |
+| **Weighted Random Selection** | Node selection proportional to reputation: P(nᵢ) = repᵢ / Σrepⱼ. Prevents monopoly. |
+| **Reputation-Gated Execution** | Only nodes with sufficient reputation can claim tasks. Higher reputation = higher probability + higher-value access. |
+| **Nodo** | Celaut's node software. Handles execution, peer discovery, load balancing, dependencies. |
+| **Commit-Reveal** | Two-phase protocol preventing strategic behavior. Off-chain commits, batched on-chain settlement. |
+| **Data Input** | Ergo eUTXO feature: reference a box for data without spending it. Used to verify reputation. |
+| **Batched Settlement** | Amortizing multiple rating resolutions into a single on-chain transaction for cost efficiency. |
 
 ---
 
