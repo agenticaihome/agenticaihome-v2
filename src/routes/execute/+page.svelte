@@ -12,6 +12,7 @@
     // Form state
     let serviceHash = '';
     let ergAmount = '';
+    let minReputation = '100';
     let deadline = '';
     
     // Transaction state
@@ -149,7 +150,7 @@
 
 <svelte:head>
     <title>Execute Service - AgenticAiHome V2</title>
-    <meta name="description" content="Execute AI services on the decentralized AgenticAiHome network." />
+    <meta name="description" content="Request AI service execution on the decentralized AgenticAiHome network. Lock ERG, set minimum reputation, let the best node execute." />
 </svelte:head>
 
 <div class="execute-page">
@@ -158,8 +159,9 @@
         <div class="page-header">
             <h1 class="page-title">⚡ Execute a Service</h1>
             <p class="page-description">
-                Lock ERG to request AI service execution. Smart contracts 
-                ensure fair outcomes and automatic settlement upon completion.
+                Lock ERG in a contract specifying service hash, minimum reputation threshold, 
+                and deadline. After the deadline, the node with the highest reputation 
+                (above your minimum) claims the ERG and executes the service.
             </p>
         </div>
 
@@ -234,9 +236,27 @@
                                 </div>
                             </div>
 
+                            <!-- Minimum Reputation -->
+                            <div class="form-field">
+                                <Label for="minReputation">Minimum Node Reputation (R)</Label>
+                                <Input
+                                    id="minReputation"
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    placeholder="e.g., 100"
+                                    bind:value={minReputation}
+                                    disabled={isLoading}
+                                />
+                                <div class="field-help">
+                                    Only nodes with reputation ≥ R can claim this job. 
+                                    Higher = more trusted nodes, fewer candidates.
+                                </div>
+                            </div>
+
                             <!-- Deadline -->
                             <div class="form-field">
-                                <Label for="deadline">Execution Deadline</Label>
+                                <Label for="deadline">Execution Deadline (Block T)</Label>
                                 <Input
                                     id="deadline"
                                     type="datetime-local"
@@ -315,9 +335,10 @@
                         <div class="workflow-step">
                             <div class="step-number">1</div>
                             <div class="step-content">
-                                <h4 class="step-title">Lock ERG for Execution</h4>
+                                <h4 class="step-title">Lock ERG + Define Terms</h4>
                                 <p class="step-description">
-                                    Your payment is locked in a smart contract until service completion.
+                                    You lock X ERG in a contract specifying: service hash (S), 
+                                    minimum reputation (R), and deadline block (T).
                                 </p>
                             </div>
                         </div>
@@ -325,9 +346,11 @@
                         <div class="workflow-step">
                             <div class="step-number">2</div>
                             <div class="step-content">
-                                <h4 class="step-title">Celaut Node Picks Up</h4>
+                                <h4 class="step-title">Nodes Compete by Reputation</h4>
                                 <p class="step-description">
-                                    A qualified node from the Celaut network accepts your execution request.
+                                    Nodes on the Celaut network see your request on-chain. 
+                                    After deadline T, the node with the highest reputation 
+                                    (above minimum R) can claim the ERG.
                                 </p>
                             </div>
                         </div>
@@ -335,9 +358,10 @@
                         <div class="workflow-step">
                             <div class="step-number">3</div>
                             <div class="step-content">
-                                <h4 class="step-title">Service Execution</h4>
+                                <h4 class="step-title">Node Executes Service</h4>
                                 <p class="step-description">
-                                    The AI service runs on distributed infrastructure with cryptographic verification.
+                                    The winning node executes service S. Their reputation is 
+                                    at stake — dishonest execution results in negative reputation.
                                 </p>
                             </div>
                         </div>
@@ -345,9 +369,10 @@
                         <div class="workflow-step">
                             <div class="step-number">4</div>
                             <div class="step-content">
-                                <h4 class="step-title">Result Delivery</h4>
+                                <h4 class="step-title">Bilateral Rating</h4>
                                 <p class="step-description">
-                                    Results are delivered and payment is automatically released to the provider.
+                                    Both client and node rate each other. Reputation updates 
+                                    on-chain, building trust for future interactions.
                                 </p>
                             </div>
                         </div>

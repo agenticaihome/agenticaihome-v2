@@ -110,9 +110,9 @@
         <div class="page-header">
             <h1 class="page-title">🏆 EGO Reputation</h1>
             <p class="page-description">
-                Soulbound reputation tokens that represent your contributions to the 
-                decentralized AI agent network. Higher scores unlock premium features 
-                and better service provider rates.
+                Bilateral reputation system for both nodes and clients. Nodes build trust 
+                through reliable execution. Clients build trust through honest ratings and 
+                payment history. Reputation determines who can claim jobs and at what price.
             </p>
         </div>
 

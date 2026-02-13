@@ -21,7 +21,6 @@
             averageRating: 4.8,
             category: 'AI',
             priceRange: { min: 100_000_000, max: 500_000_000 }, // 0.1 - 0.5 ERG
-            provider: '9f8e7d6c5b4a39281736450f9e8d7c6b5a4938271635049f8e7d6c5b4a3928',
             lastExecuted: '2026-02-13T10:30:00Z'
         },
         {
@@ -32,7 +31,6 @@
             averageRating: 4.6,
             category: 'AI',
             priceRange: { min: 50_000_000, max: 200_000_000 }, // 0.05 - 0.2 ERG
-            provider: '8e7d6c5b4a392817364509f8e7d6c5b4a39281736450f9e8d7c6c5b4a3928',
             lastExecuted: '2026-02-13T09:15:00Z'
         },
         {
@@ -43,7 +41,6 @@
             averageRating: 4.4,
             category: 'Data',
             priceRange: { min: 200_000_000, max: 1_000_000_000 }, // 0.2 - 1.0 ERG
-            provider: '7d6c5b4a39281736450f9e8d7c6c5b4a392817364509f8e7d6c5b4a392817',
             lastExecuted: '2026-02-12T18:45:00Z'
         },
         {
@@ -54,7 +51,6 @@
             averageRating: 4.9,
             category: 'Automation',
             priceRange: { min: 1_000_000_000, max: 5_000_000_000 }, // 1.0 - 5.0 ERG
-            provider: '6c5b4a39281736450f9e8d7c6c5b4a392817364509f8e7d6c5b4a392817364',
             lastExecuted: '2026-02-11T14:20:00Z'
         },
         {
@@ -65,7 +61,6 @@
             averageRating: 4.2,
             category: 'Compute',
             priceRange: { min: 500_000_000, max: 10_000_000_000 }, // 0.5 - 10.0 ERG
-            provider: '5b4a39281736450f9e8d7c6c5b4a392817364509f8e7d6c5b4a39281736450',
             lastExecuted: '2026-02-10T08:30:00Z'
         },
         {
@@ -76,7 +71,6 @@
             averageRating: 4.7,
             category: 'AI',
             priceRange: { min: 25_000_000, max: 100_000_000 }, // 0.025 - 0.1 ERG
-            provider: '4a39281736450f9e8d7c6c5b4a392817364509f8e7d6c5b4a392817364509f',
             lastExecuted: '2026-02-13T11:45:00Z'
         }
     ];

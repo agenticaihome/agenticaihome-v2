@@ -26,8 +26,8 @@
 </script>
 
 <svelte:head>
-    <title>AgenticAiHome V2 - The Unstoppable AI Agent Economy</title>
-    <meta name="description" content="Fully decentralized AI agent marketplace built on Ergo blockchain. No backend, no database, completely unstoppable." />
+    <title>AgenticAiHome V2 - Decentralized AI Service Network</title>
+    <meta name="description" content="Fully decentralized AI service network built on Ergo blockchain. No backend, no database, completely unstoppable." />
 </svelte:head>
 
 <!-- Hero Section -->
@@ -42,13 +42,13 @@
             
             <h1 class="hero-title">
                 The Unstoppable 
-                <span class="hero-highlight">AI Agent Economy</span>
+                <span class="hero-highlight">AI Service Network</span>
             </h1>
             
             <p class="hero-description">
-                The world's first truly decentralized AI agent marketplace. 
-                Built on Ergo blockchain with zero dependencies on centralized servers.
-                Your agents, your data, your control.
+                The world's first truly decentralized AI service network. 
+                Services identified by hash. Nodes compete by reputation. 
+                No backend, no database, no central authority.
             </p>
             
             <div class="hero-actions">
@@ -90,7 +90,7 @@
         <div class="features-header">
             <h2 class="features-title">Decentralized AI Infrastructure</h2>
             <p class="features-subtitle">
-                Three pillars of the unstoppable AI agent economy
+                Three pillars of the decentralized AI service network
             </p>
         </div>
         
@@ -103,13 +103,13 @@
                 </CardHeader>
                 <CardContent>
                     <p class="feature-description">
-                        Discover and execute AI services from a global network of providers.
-                        All interactions happen on-chain with cryptographic guarantees.
+                        Discover AI services identified by hash. Any capable node on the 
+                        network can execute any service. Fully permissionless.
                     </p>
                     <div class="feature-highlights">
-                        <div class="highlight-item">✓ Zero-trust execution</div>
-                        <div class="highlight-item">✓ Cryptographic proofs</div>
-                        <div class="highlight-item">✓ Global provider network</div>
+                        <div class="highlight-item">✓ Services identified by hash</div>
+                        <div class="highlight-item">✓ Any node can execute</div>
+                        <div class="highlight-item">✓ Global node network</div>
                     </div>
                     <Button 
                         class="w-full mt-4 bg-blue-500 hover:bg-blue-600"
@@ -128,13 +128,13 @@
                 </CardHeader>
                 <CardContent>
                     <p class="feature-description">
-                        Soulbound reputation tokens that track your contributions to the network.
-                        6-layer anti-gaming system ensures authentic reputation.
+                        Bilateral reputation for both nodes and clients. Nodes build trust 
+                        through execution history. Clients prove reliability through payment history.
                     </p>
                     <div class="feature-highlights">
-                        <div class="highlight-item">✓ Soulbound tokens</div>
-                        <div class="highlight-item">✓ Anti-gaming system</div>
-                        <div class="highlight-item">✓ Transparent scoring</div>
+                        <div class="highlight-item">✓ Bilateral (nodes + clients)</div>
+                        <div class="highlight-item">✓ On-chain verification</div>
+                        <div class="highlight-item">✓ Anti-gaming protection</div>
                     </div>
                     <Button 
                         class="w-full mt-4 bg-amber-500 hover:bg-amber-600 text-black font-medium"
@@ -153,13 +153,13 @@
                 </CardHeader>
                 <CardContent>
                     <p class="feature-description">
-                        Lock ERG and request AI service execution on the decentralized network.
-                        Smart contracts ensure fair outcomes for both parties.
+                        Lock ERG in a contract specifying service hash, minimum reputation, 
+                        and deadline. The highest-reputation node claims and executes.
                     </p>
                     <div class="feature-highlights">
-                        <div class="highlight-item">✓ Smart contract protection</div>
-                        <div class="highlight-item">✓ Smart contract execution</div>
-                        <div class="highlight-item">✓ Automated settlement</div>
+                        <div class="highlight-item">✓ Reputation-gated execution</div>
+                        <div class="highlight-item">✓ Deadline enforcement</div>
+                        <div class="highlight-item">✓ On-chain settlement</div>
                     </div>
                     <Button 
                         class="w-full mt-4 bg-green-500 hover:bg-green-600"
@@ -237,9 +237,9 @@
         <div class="partnership-content">
             <h2 class="partnership-title">Partnership with Celaut</h2>
             <p class="partnership-description">
-                AgenticAiHome V2 integrates with the Celaut network to provide 
-                distributed AI service execution at the edge, ensuring low latency 
-                and high availability for AI agent workloads.
+                AgenticAiHome is the discovery and reputation layer. Celaut is the 
+                execution layer. Together: users find services on AIH, lock ERG, 
+                and Celaut nodes compete by reputation to execute them.
             </p>
             
             <div class="partnership-features">

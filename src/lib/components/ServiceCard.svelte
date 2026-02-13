@@ -20,7 +20,6 @@ Displays a service in the service explorer grid
             min: number;
             max: number;
         };
-        provider?: string;
         lastExecuted?: string;
     };
 
@@ -119,14 +118,6 @@ Displays a service in the service explorer grid
             </div>
         {/if}
 
-        <!-- Provider -->
-        {#if service.provider}
-            <div class="provider-info">
-                <span class="provider-label">Provider:</span>
-                <code class="provider-value">{truncateHash(service.provider)}</code>
-            </div>
-        {/if}
-
         <!-- Action Button -->
         <div class="card-actions">
             <Button 
@@ -189,20 +180,16 @@ Displays a service in the service explorer grid
         @apply text-sm font-medium;
     }
 
-    .price-range, .provider-info {
+    .price-range {
         @apply flex justify-between items-center text-sm;
     }
 
-    .price-label, .provider-label {
+    .price-label {
         @apply text-muted-foreground;
     }
 
     .price-value {
         @apply font-mono text-amber-600 dark:text-amber-400;
-    }
-
-    .provider-value {
-        @apply bg-muted px-1.5 py-0.5 rounded text-foreground font-mono text-xs;
     }
 
     .card-actions {
