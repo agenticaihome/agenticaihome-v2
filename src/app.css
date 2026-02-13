@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Variables de fuente basadas en tu tema */
+    --font-heading: 'Montserrat', sans-serif;
+    --font-body: 'Inconsolata', monospace;
+
+    /* Tema de colores basado en las imágenes */
+    /* Colores principales: Un fondo crema claro y un texto casi negro para un contraste alto y elegante. */
+    --background: 33 60% 98%; /* Crema claro, aprox #FDFBF8 */
+    --foreground: 210 4% 9%;   /* Negro suave, #151617 */
+
+    /* Tarjetas: Un tono melocotón pálido para los recuadros. */
+    --card: #fdfaf780;         /* #F2DED0 */
+    --card-foreground: 210 4% 9%; /* #151617 */
+
+    --popover: 33 60% 98%;
+    --popover-foreground: 210 4% 9%;
+
+    /* Primario: Se usa el color del texto como acento principal para botones y enlaces. */
+    --primary: 210 4% 9%;         /* #151617 */
+    --primary-foreground: 0 0% 100%; /* Blanco, para el texto sobre el botón primario */
+
+    /* Secundario: El fondo de la tarjeta puede funcionar como fondo secundario. */
+    --secondary: 28 55% 91%;        /* #F2DED0 */
+    --secondary-foreground: 210 4% 9%; /* #151617 */
+
+    /* Muted: El segundo color de acento opcional para elementos discretos. */
+    --muted: 40 9% 72%;           /* #BAB6AA */
+    --muted-foreground: 210 4% 15%; /* Un poco más claro que el texto principal */
+
+    /* Acento: Se alinea con el color primario, ya que el tema es minimalista. */
+    --accent: 210 4% 9%;          /* #151617 */
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructivo: Un rojo estándar que no desentona. */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordes e Inputs: El color de texto se usa para los bordes, creando un look definido. */
+    --border: 210 4% 9%;         /* #151617 */
+    --input: 28 55% 91%;          /* #F2DED0 - para el fondo del input */
+    --ring: 40 9% 72%;            /* #BAB6AA - para el anillo de foco */
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* --- CORRECCIÓN --- */
+    /* Se aumentó la luminosidad de la tarjeta para mayor contraste. */
+    --background: 210 4% 9%;         /* #151617 */
+    --foreground: 33 60% 98%;         /* #FDFBF8 */
+
+    --card: #252628;
+    --card-foreground: 33 60% 98%;
+
+    --popover: 210 4% 9%;
+    --popover-foreground: 33 60% 98%;
+
+    /* En modo oscuro, el primario es el color claro del texto. */
+    --primary: 33 60% 98%;
+    --primary-foreground: 210 4% 9%;
+
+    /* Actualizado para coincidir con el color de la tarjeta. */
+    --secondary: 210 4% 15%;
+    --secondary-foreground: 33 60% 98%;
+
+    --muted: 40 9% 25%;
+    --muted-foreground: 40 9% 72%;
+
+    --accent: 33 60% 98%;
+    --accent-foreground: 210 4% 9%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 33 60% 98%;
+    /* Actualizado para coincidir con el color de la tarjeta. */
+    --input: 210 4% 15%;
+    --ring: 40 9% 72%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    font-weight: 900; /* Corresponde a la variante "Negro" de Montserrat */
+    @apply text-foreground;
+  }
+}
