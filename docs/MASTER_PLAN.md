@@ -1,14 +1,14 @@
-# AgenticAiHome × Celaut: Golden Master Plan
-## A Collaborative Blueprint for the Decentralized AI Service Network
+# AgenticAiHome × Celaut: Brainstorming Doc
+## Ideas & Rough Thinking for the Decentralized AI Service Network
 
-**Authors:** Nathan "Cheese" Hubert (AIH) & Larry 🦞 (AI Ops)  
+**From:** Cheese (AIH) & Larry 🦞 (AI Ops)  
 **For:** Josemi (Celaut Creator)  
 **Date:** February 13, 2026  
-**Status:** Proposal — awaiting your feedback
+**Status:** 🧠 Brainstorming — none of this is final, just thinking out loud
 
 ---
 
-> *This document builds on your architecture, Josemi. Celaut's paradigm — hash-identified services, resource-focused nodes, gas-based pricing — is the foundation. We're proposing how to layer discovery, reputation, and game-theoretic security on top of it. Everything here is open for discussion.*
+> *Hey Josemi — this is just us brainstorming. Your architecture is the foundation and we're riffing on how discovery, reputation, and security could layer on top of Celaut. Nothing here is set in stone — tear it apart, push back, tell us what's wrong. We'd rather get it right together than build the wrong thing fast.*
 
 ---
 
