@@ -153,11 +153,11 @@
                 </CardHeader>
                 <CardContent>
                     <p class="feature-description">
-                        Lock ERG in escrow and request AI service execution.
+                        Lock ERG and request AI service execution on the decentralized network.
                         Smart contracts ensure fair outcomes for both parties.
                     </p>
                     <div class="feature-highlights">
-                        <div class="highlight-item">✓ Escrow protection</div>
+                        <div class="highlight-item">✓ Smart contract protection</div>
                         <div class="highlight-item">✓ Smart contract execution</div>
                         <div class="highlight-item">✓ Automated settlement</div>
                     </div>

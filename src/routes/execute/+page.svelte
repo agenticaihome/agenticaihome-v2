@@ -149,7 +149,7 @@
 
 <svelte:head>
     <title>Execute Service - AgenticAiHome V2</title>
-    <meta name="description" content="Execute AI services on the decentralized AgenticAiHome network with escrow protection." />
+    <meta name="description" content="Execute AI services on the decentralized AgenticAiHome network." />
 </svelte:head>
 
 <div class="execute-page">
@@ -158,7 +158,7 @@
         <div class="page-header">
             <h1 class="page-title">⚡ Execute a Service</h1>
             <p class="page-description">
-                Lock ERG in escrow to request AI service execution. Smart contracts 
+                Lock ERG to request AI service execution. Smart contracts 
                 ensure fair outcomes and automatic settlement upon completion.
             </p>
         </div>
@@ -169,7 +169,7 @@
                 <CardHeader>
                     <CardTitle class="text-xl">Service Execution Request</CardTitle>
                     <p class="text-sm text-muted-foreground">
-                        Provide service details and lock payment in escrow
+                        Provide service details and lock payment
                     </p>
                 </CardHeader>
                 <CardContent>
@@ -180,7 +180,7 @@
                             <h3 class="connect-title">Connect Your Wallet</h3>
                             <p class="connect-description">
                                 You need to connect your Nautilus wallet to execute services 
-                                and create escrow transactions.
+                                to request service execution.
                             </p>
                         </div>
                     {:else}
@@ -225,7 +225,7 @@
                                     <div class="field-error">{amountError}</div>
                                 {/if}
                                 <div class="field-help">
-                                    Amount will be held in escrow until service completion
+                                    Amount will be locked until service completion
                                     {#if $balance}
                                         <span class="balance-info">
                                             (Balance: {formatErg($balance / 1_000_000_000)} ERG)
@@ -315,7 +315,7 @@
                         <div class="workflow-step">
                             <div class="step-number">1</div>
                             <div class="step-content">
-                                <h4 class="step-title">Lock ERG in Escrow</h4>
+                                <h4 class="step-title">Lock ERG for Execution</h4>
                                 <p class="step-description">
                                     Your payment is locked in a smart contract until service completion.
                                 </p>
@@ -365,7 +365,7 @@
                         <div class="todo-text">
                             <h3 class="todo-title">Celaut Integration in Progress</h3>
                             <p class="todo-description">
-                                The current implementation creates placeholder escrow transactions. 
+                                The current implementation is a preview. 
                                 Full integration with the Celaut execution network will enable:
                             </p>
                             <div class="todo-features">

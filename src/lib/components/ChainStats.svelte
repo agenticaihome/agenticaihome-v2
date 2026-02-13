@@ -84,7 +84,7 @@ Displays real-time statistics from the Ergo blockchain for AgenticAiHome
     {:else}
         <div class="stats-grid">
             <div class="stat-item">
-                <div class="stat-label">Total ERG in Escrow</div>
+                <div class="stat-label">Total ERG Locked</div>
                 <div class="stat-value">{formatErg(totalEscrowValue)} ERG</div>
             </div>
             
