@@ -23,21 +23,23 @@
 
 ### Client-Side Attacks
 
-#### A1: Dishonest Client (Free Service)
-**Attack:** Client receives valid execution, rates it invalid anyway. Gets service for free while damaging node reputation.
+#### A1: Dishonest Client (Reputation Damage)
+**Attack:** Client receives valid execution, rates it invalid anyway. The node already has the ERG (payment happens before execution in the gas model), so the client does NOT get service for free — but they CAN damage the node's reputation unfairly.
 
-**Why it matters:** This is the #1 attack Josemi identified. If clients can lie with no cost, no rational node would participate.
+**Why it matters:** This is the #1 attack Josemi identified. If clients can lie with no cost, nodes face reputational erosion despite honest execution.
 
 **Solutions:**
+- **Verified-purchase ratings only:** Only clients who actually paid ERG for a service can rate it. Non-payers' opinions carry zero weight. Like online stores marking "verified purchase" on reviews — you can see who actually used the service vs. who's inventing complaints.
 - **Commit-reveal ratings:** Both parties submit encrypted rating hashes simultaneously, then reveal. Neither can adjust based on the other's rating. Prevents retaliatory/strategic rating.
 - **Bilateral reputation cost:** Rating a node negatively also costs the client reputation points (small amount). A pattern of negative ratings makes the client suspicious. High-reputation nodes refuse low-rep clients.
-- **Stake-to-rate-negative:** To submit a negative rating, the client must stake Y ERG. If the node disputes and community consensus sides with the node, the client loses the stake. Makes false negatives expensive.
+- **Execution receipts (reproducibility):** Node publishes a signed execution receipt: input hash, output hash, service hash, execution params. For deterministic services, ANYONE can re-execute and verify the node performed correctly. A dishonest client's negative rating can be publicly disproven. (See §Reproducibility below.)
 - **Reputation ratio tracking:** Track each client's negative-to-positive rating ratio. Clients who rate negatively more than 2 standard deviations above the network average get flagged and their ratings carry less weight.
 
 #### A2: Sybil Clients
 **Attack:** Client creates multiple wallets to spread negative ratings across a node's history, making it look like multiple unhappy clients.
 
 **Solutions:**
+- **Verified-purchase filter:** You can see exactly which clients paid ERG for which services. Sybil wallets that never actually paid for a service simply can't rate it. "Simply ignore who is inventing things" — Josemi.
 - **Minimum reputation to post tasks:** New wallets can't immediately request services. They need to build minimum client reputation first (perhaps by being a node, or by completing small verified interactions).
 - **Diversity-weighted ratings:** The system already detects when ratings come from wallets that interact suspiciously (same funding source, similar timing patterns). These get dampened.
 - **Cost of entry:** Each wallet needs minimum ERG to participate. Sybil attacks become expensive.
@@ -46,8 +48,10 @@
 **Attack:** Client sets X ERG far below the actual cost of executing service S, wasting node compute resources when they realize it's not worth claiming.
 
 **Solutions:**
+- **Node's responsibility:** This is fundamentally a node-side concern. Nodes should filter off-chain to only claim bids that are worth their resources. The cost of that filtering gets priced into their bids. (Josemi's point: "en este caso es problema del nodo.")
 - **Market pricing oracle:** Track historical execution costs per service hash. Warn nodes (or auto-reject) when payment is significantly below historical average.
 - **Nodes choose:** Nodes aren't forced to claim. If payment is too low, no node claims, and ERG returns to client after deadline. Market self-corrects.
+- **Value proposition of AIH:** Running services node-to-node will always be cheaper. AIH's value is enabling DAOs, on-chain systems, and users who want trustless execution without running their own node.
 
 #### A4: Targeted Node Attack
 **Attack:** Client sets very high min reputation R to ensure only one specific node can claim, then rates that node negatively.
@@ -122,6 +126,105 @@
 - **Minimum task value:** Enforce minimum ERG per task (e.g., 0.01 ERG). Makes spam expensive.
 - **Client reputation required:** Low-reputation clients have rate limits on task creation.
 - **On-chain cost:** Every task is an Ergo transaction with fees. Spam costs real ERG.
+
+---
+
+## Reproducible Execution — Solving the Verification Problem
+
+*"Hay que buscar una mecánica para que las tareas en AIH tengan una propiedad similar [to Game of Prompts], de forma que podamos ver que otras tareas que se le mandaron a los nodos fueron las correctas."* — Josemi
+
+This is the hardest problem. Josemi's Game of Prompts solves it because games are deterministic: same seed → same game → same result. Anyone can replay and verify. We need the same property for AI services.
+
+### The Two-Component Reputation Model (from GoP)
+
+Reputation is NOT just a number. It has two components:
+
+1. **On-chain stake:** ERG and tokens burned/sacrificed. Skin in the game. Expensive to fake.
+2. **Off-chain verifiable history:** A complete, public log of every past interaction — inputs, outputs, ratings given. Anyone can inspect and reproduce.
+
+A rater's reputation depends on BOTH. High ERG burned but a history of provably-wrong ratings = untrustworthy. The burned tokens are a shortcut for lazy observers; the full history is the real truth.
+
+### How Verification Works on AIH
+
+#### Tier 1: Deterministic Services (Celaut's Sweet Spot)
+Services identified by content hash → same input ALWAYS produces same output.
+
+**Mechanism:**
+- Node publishes an **Execution Receipt** on-chain (or on a public append-only log):
+  - `service_hash` — which service was run
+  - `input_hash` — hash of the exact input
+  - `output_hash` — hash of the exact output
+  - `node_signature` — proves this node claims this execution
+- **Anyone** can download the service (by hash), feed it the same input, and verify `output_hash` matches
+- If a client rates a node negatively but the execution receipt checks out → the client is provably lying
+- If a node claims execution but the output hash doesn't match → the node is provably lying
+
+**This is nearly identical to GoP:** bot_id = service_hash, game_seed = input_hash, score = output_hash, logs = execution trace.
+
+**Key insight:** For deterministic services, the verification cost is just "re-run the service." This is Celaut's architectural strength — services ARE deterministic containers.
+
+#### Tier 2: Semi-Deterministic Services (Most AI Tasks)
+Many AI tasks use LLMs which are inherently non-deterministic (temperature > 0, different hardware = different float rounding). Exact reproduction isn't always possible.
+
+**Mechanism: Bounded Verification**
+- Node publishes execution receipt WITH full execution log:
+  - `input` (the actual prompt/request)
+  - `output` (the actual response)
+  - `model_id`, `parameters` (temperature, seed if available)
+  - `resource_usage` (compute time, memory)
+- Verification isn't "did you produce the EXACT same output?" but "given this input and these parameters, is this output REASONABLE?"
+- **Challenge protocol:** If a client rates negatively, any third party can inspect the receipt:
+  - Did the node use the right model? (Verifiable from logs)
+  - Is the output quality consistent with the service spec? (Re-run with same params → similar quality)
+  - Did the node actually spend the claimed resources? (Celaut resource proofs)
+- **Statistical verification:** Over many tasks, a node's outputs form a distribution. A node that consistently delivers low-quality outputs (cheap model, truncated responses) will show a statistical signature that diverges from honest execution.
+
+#### Tier 3: Non-Deterministic / Creative Services
+For truly subjective outputs (creative writing, design), exact verification is impossible.
+
+**Mechanism: Reputation-Weighted Panel Review**
+- High-value non-deterministic tasks require **panel validation**: 2-3 independent high-reputation nodes review the output
+- Panel members are randomly selected (can't be bribed in advance)
+- Panel's assessment overrides bilateral ratings if there's a dispute
+- Panel members stake reputation on their review — dishonest panel members get caught when THEIR past reviews are inspected (the GoP recursion: "I can check if Alice's past judgments were honest")
+
+### Making It Concrete: The Execution Receipt Standard
+
+Every task completion on AIH produces a public **Execution Receipt**:
+
+```
+ExecutionReceipt {
+  task_id:        ErgoBoxId       // the original task box
+  service_hash:   Hash            // content-addressed service identifier
+  node_id:        Address         // executing node
+  input_hash:     Hash            // H(input data)
+  output_hash:    Hash            // H(output data)
+  input_uri:      URI             // where to download full input (IPFS, Ergo box, etc.)
+  output_uri:     URI             // where to download full output
+  exec_params:    JSON            // model, temperature, seed, resource limits
+  exec_log_uri:   URI             // optional: full execution trace
+  timestamp:      Long            // block height at completion
+  node_sig:       Signature       // node signs this receipt
+}
+```
+
+The receipt is published on-chain (compact hash) with full data on IPFS or similar. Anyone can:
+1. Download the service by `service_hash`
+2. Download the input by `input_uri`
+3. Re-execute and compare against `output_hash`
+4. If mismatch → node lied. If match → client who rated negatively lied.
+
+**Josemi's principle applies:** "Alice no querrá quemar tokens y despues subir algo que cualquiera puede ver que no es cierto." — Nobody wants to burn tokens and then post something anyone can disprove.
+
+### Why This Solves All the Rating Problems
+
+| Attack | How Receipt Solves It |
+|--------|----------------------|
+| Client rates valid work as invalid | Receipt proves work was done correctly. Client's negative rating is publicly disprovable. |
+| Node claims execution but didn't do it | No receipt, or receipt with wrong output hash. Provably caught. |
+| Node uses cheaper model than promised | exec_params show model used. Anyone can re-run and compare quality. |
+| Sybil clients mass-downvote | Their ratings conflict with verifiable receipts. Auto-dampened. |
+| Reputation laundering | Full history of receipts is public. Quality at each tier is verifiable. |
 
 ---
 
@@ -212,11 +315,14 @@ For deterministic services (Celaut's strength):
 
 ## Open Questions for Josemi
 
-1. In Celaut's deterministic execution model, can we get output hashes cheaply? If yes, verification is nearly free and most attacks become irrelevant.
-2. How does Celaut handle service versioning? Same hash = same code forever? Or can services be updated?
+1. ~~In Celaut's deterministic execution model, can we get output hashes cheaply?~~ **ANSWERED: Yes — Execution Receipts solve this. Output hashes published on-chain/IPFS.**
+2. How does Celaut handle service versioning? Same hash = same code forever? Or can services be updated? *(Still open — affects receipt verification)*
 3. What's the minimum viable node registration cost that prevents sybils without excluding genuine participants?
 4. For the commit-reveal pattern on Ergo — do you see any eUTXO constraints that make this difficult?
 5. Does Celaut already have resource commitment proofs? If nodes prove they allocated X GPU hours, that's a powerful anti-gaming signal.
+6. **NEW:** For the Execution Receipt standard — does Celaut already produce execution logs/traces that we can use? Or do we need to build that layer?
+7. **NEW:** For semi-deterministic services (LLMs), what level of "bounded verification" does Josemi think is practical? Exact output match vs. statistical quality check?
+8. **NEW:** Storage for receipts — IPFS, Ergo extension blocks, or Celaut's own P2P layer?
 
 ---
 

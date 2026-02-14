@@ -47,12 +47,21 @@ Since tier progression requires completing real tasks at each prior tier (no sho
 
 ### Dishonest Client (Rate Invalid After Valid Execution)
 
-Commit-reveal bilateral ratings (Vickrey, 1961) eliminate strategic rating: neither party sees the other's rating before committing. Additionally:
+**Clarification:** In the gas model, the node withdraws ERG *before* executing. The client does NOT get service for free — but they CAN damage the node's reputation unfairly. This makes the attack purely reputational.
+
+**Primary defense: Execution Receipts (the Reproducibility Principle)**
+
+Inspired by Josemi's Game of Prompts: every task completion produces a public Execution Receipt containing input hash, output hash, service hash, and execution parameters. For deterministic services, *anyone* can re-execute the service with the same input and verify the output matches. A dishonest client's negative rating is publicly disprovable.
+
+"Alice no querrá quemar tokens y despues subir algo que cualquiera puede ver que no es cierto." — Josemi
+
+**Additional layers:**
+- **Verified-purchase ratings only:** Only clients who paid ERG for a specific service can rate it. Non-payers' opinions carry zero weight.
+- Commit-reveal bilateral ratings (Vickrey, 1961) eliminate strategic rating: neither party sees the other's rating before committing.
 - Clients who rate negatively at >2σ above network average get statistically flagged; their ratings carry diminishing weight.
 - Client reputation is symmetric — dishonest rating patterns degrade the client's own score.
-- High-reputation nodes can refuse low-reputation clients.
 
-The client gains one free service but loses the ability to attract quality nodes for future tasks. For any client who plans to use the network more than once, honesty dominates.
+The client's negative rating can now be audited against the execution receipt. For deterministic services, a false negative rating is provably false. For non-deterministic services, the receipt provides evidence for panel review. Reputation becomes not just a number, but a verifiable history.
 
 ### Sybil Attack (Fake Identities)
 
