@@ -190,6 +190,8 @@ For truly subjective outputs (creative writing, design), exact verification is i
 
 ### Making It Concrete: The Execution Receipt Standard
 
+**Zero backends. Zero databases. Zero servers.** The entire verification layer runs on Ergo + IPFS + Celaut P2P. No central infrastructure to compromise or maintain.
+
 Every task completion on AIH produces a public **Execution Receipt**:
 
 ```
@@ -199,8 +201,8 @@ ExecutionReceipt {
   node_id:        Address         // executing node
   input_hash:     Hash            // H(input data)
   output_hash:    Hash            // H(output data)
-  input_uri:      URI             // where to download full input (IPFS, Ergo box, etc.)
-  output_uri:     URI             // where to download full output
+  input_uri:      URI             // where to download full input (IPFS or Celaut P2P)
+  output_uri:     URI             // where to download full output (IPFS or Celaut P2P)
   exec_params:    JSON            // model, temperature, seed, resource limits
   exec_log_uri:   URI             // optional: full execution trace
   timestamp:      Long            // block height at completion
@@ -208,7 +210,18 @@ ExecutionReceipt {
 }
 ```
 
-The receipt is published on-chain (compact hash) with full data on IPFS or similar. Anyone can:
+**Storage — fully decentralized:**
+- **On-chain (Ergo):** Compact receipt hash stored in the transaction's registers. Tiny, cheap, permanent, immutable.
+- **Off-chain (IPFS / Celaut P2P):** Full receipt data (inputs, outputs, logs) stored content-addressed. No server needed — data lives on the peer network. Content hash = built-in integrity check.
+- **Verification:** Pure client-side. Anyone downloads the receipt from IPFS, downloads the service by hash, re-executes with the same input, compares output hashes. No backend involved. Same way Bitcoin nodes independently validate blocks.
+
+**No backend needed because:**
+- Ergo blockchain IS the database (receipt hashes, reputation state, task boxes)
+- IPFS IS the file storage (receipt data, execution logs)
+- Celaut P2P IS the compute layer (service execution, re-verification)
+- Rating dampening is computed independently by each participant (like Bitcoin consensus)
+
+Anyone can:
 1. Download the service by `service_hash`
 2. Download the input by `input_uri`
 3. Re-execute and compare against `output_hash`
