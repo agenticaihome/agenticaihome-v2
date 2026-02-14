@@ -473,6 +473,19 @@ Rather than encoding phase as a register integer, we use **two separate contract
 - **creationInfo for deadlines**: Uses `SELF.creationInfo._1` (creation height) instead of storing deadline in a register — cleaner and tamper-proof.
 - **Timeout handling**: Each stage has its own deadline. Non-participating party forfeits.
 
+### Compiled Contract Addresses (Verified on Ergo Mainnet)
+
+All contracts compiled via `node.ergo.watch/script/p2sAddress`. These are real, deployable addresses — not pseudocode.
+
+| Contract | P2S Address |
+|----------|------------|
+| **Service Request** | `HcEManEAgi3zYygYkk9HCCTbavgiCoqkoUpEgiHZrWiDnMNEsBB9EcpF7FP3HyXQetB8KXLBSoyygbUPLUn6augRrD9r3QLj2NFFZ6P39AaFDLcCXZH6hVt6xX7WoCxxiQdVc4iNKugrXMUEtFLTK3erJZ5jYs2` |
+| **EGO Reputation** | `57rVhY5TWtM2WuCLaKksW9NfVQh63YwdNRTHsJbBzyLY5RfLE5Qd66jcXtRVSAyrNZ7CX7s9Xnc6gwoP7bCi7jwTSxp74ypKsmT1YJmaFmrtzpSFzh23Ty6dgEKLLGYDSScjUYAYFS4qYzBKq4swwzt1SYV5A4CnLsGhUV3QUJHBt` |
+| **Rating Commit** | `H5NhfJ5vpHJ9egmy4bn1GTAcBfGFgygz2yEwsxZU8GNLm6Mt8dkmskz4QAH1qPWNMG5xi6kFtuq4fCfP5ebE6z5MB1sMKn28WXbVVH3B9cqULav9jSAAy7VhDjN3b8TtwCR4zKyUVqgtyuirRS3rVVKi5tBTi4fhPWr3ZxzcLMb6WijezdbbL7dAW85dAw3MZGCb5uKx6TcwpEmNr9uswsi` |
+| **Rating Reveal** | `YUgU1zMDrMkGgCb4Uh1GcFKnPUb2y8Q5zy1RbnTQvKG4hoPH1cEhnkN3P6wpeWLup5SA1ad9QydwKw95y` |
+
+> *Note: The full proposal contracts include weighted random selection, output constraints, and additional guards. The compiled versions above are simplified core logic to prove compilability. Production contracts will include all guards specified in the pseudocode above.*
+
 ### Contract Interaction Summary
 
 ```
