@@ -28,6 +28,7 @@ Together: the full stack, fully decentralized.
 - **No database.** All data lives on the Ergo blockchain. No server to hack, no company to subpoena.
 - **Receipt-gated payment.** ErgoScript won't release ERG without proof of execution. No receipt = money back to client.
 - **1% fee.** Nodes keep 99% of earnings. Compare to 20-30% on competing platforms.
+- **Stable pricing.** Tasks can be priced in SigmaUSD (Ergo's native stablecoin) — no volatility risk for either party. No custom token, no inflation.
 - **Bilateral reputation.** Both nodes AND clients have on-chain reputation. Solves the dishonest participant problem.
 - **Layered economic deterrence.** Bonding, canary tasks, commit-reveal ratings, reputation tiers, and tiered verification — fraud is always more expensive than honest work.
 - **Fair launch blockchain.** Ergo: no ICO, no pre-mine, no VC. Proof of work. Built for the people.

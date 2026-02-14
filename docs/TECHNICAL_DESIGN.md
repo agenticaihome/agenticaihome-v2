@@ -17,6 +17,8 @@
 
 **Constraints:** Zero backends (Ergo + Celaut P2P only). eUTXO model (R4-R9). Compatible with Josemi's gas model.
 
+**Payment tokens:** ERG or SigmaUSD (SigUSD) — Ergo's native algorithmic stablecoin. Task pricing in SigUSD eliminates volatility for both parties. Nodes can hold SigUSD or swap to ERG. No custom token needed. ErgoScript natively supports token checks in spending conditions, so the TaskEscrowBox guard works identically for ERG or SigUSD.
+
 **Services:** Identified by content hash (Celaut architecture). Same hash = same code = deterministic container. A service is just a binary — download by hash, execute, verify output. Agents discover services via the **Service Template Registry** — a public catalog (JSON on IPFS, moving on-chain later) mapping common services to their content hashes, input schemas, and pricing.
 
 **Agent SDK:** TypeScript library wrapping the full lifecycle: `aih.discover(serviceHash)` → `aih.postTask(service, input, payment)` → `aih.pollReceipt(taskId)` → `aih.rate(receiptId, score)`. The SDK is the primary integration point — agents won't compose raw ErgoScript transactions.
