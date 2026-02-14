@@ -307,15 +307,15 @@ EZKL, Modulus Labs, and others are working on ZK proofs for ML inference. Not pr
 
 ## 9. Implementation Phases
 
-See [ROADMAP.md](./ROADMAP.md) for the practical build order and feature audit.
+See [BUILD_PRIORITIES.md](./BUILD_PRIORITIES.md) for the practical build order and feature audit.
 
-**Phase 1: Foundation** (Roadmap Weeks 1-4)
+**Phase 1: Foundation**
 Agent SDK v0.1, service template registry, explorer dashboard, on-chain seed derivation, failure receipt auto-refund. Receipt-gated payment, client input commitment, basic reputation tracking.
 
-**Phase 2: Economic Security** (Roadmap Months 2-3)
+**Phase 2: Economic Security**
 Node bonding (counter-box), verification bounties, insurance pool, reputation tiers, commit-reveal rating. Reputation decay, batch task posting, dry-run quotes.
 
-**Phase 3: Active Verification** (Roadmap Months 4+)
+**Phase 3: Active Verification**
 Canary tasks (start 1-2%, scale to 5%), tiered verification by task value. Dutch auction pricing, reputation portability, one-click node setup.
 
 **Phase 4+: When Ready**

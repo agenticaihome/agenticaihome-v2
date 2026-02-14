@@ -1,6 +1,6 @@
-# AIH Build Roadmap
+# AIH Build Priorities (Draft)
 
-*What to build first, and why. Audited for feasibility — no fantasy features.*
+*What to build first, and why. Audited for feasibility — open for discussion.*
 
 *Companion docs: [ONE_PAGER.md](./ONE_PAGER.md) | [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md)*
 
