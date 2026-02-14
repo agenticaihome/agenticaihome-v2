@@ -130,6 +130,10 @@ We need 7 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 **Purpose:** Client locks ERG to request execution of service S. Node selection uses **weighted random selection** — probability of winning proportional to reputation among qualifying nodes.
 
+**⚠️ Critical: Payment timing depends on task value.**
+- **Tier 0-1 (≤0.1 ERG):** Atomic claim+pay via `claimPath` below. Bond optional. Low stakes make the UX-simplicity tradeoff acceptable.
+- **Tier 2+ (>0.1 ERG):** Claim creates a **Payment Resolution Box** (Contract 4) holding the payment in escrow. Payment releases only after delivery confirmation via the **Delivery Bond** (Contract 6). This prevents the "claim and run" attack at scale.
+
 ```
 ┌─────────────────────────────────────────┐
 │ SERVICE REQUEST BOX                      │
@@ -371,7 +375,7 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
 
 ### Contract 4: Payment Resolution Box
 
-**Purpose:** Handles the atomic distribution of funds after service execution. This contract is used when payment distribution happens in a separate step from the initial claim (e.g., after delivery confirmation via the bond contract). Contract 1's `claimPath` handles the simpler case where claim + payment happen atomically.
+**Purpose:** Holds payment in escrow until delivery is confirmed. **Mandatory for Tier 2+ tasks** (>0.1 ERG). Payment releases only when the client confirms delivery via the Delivery Bond contract (Contract 6), or when the client timeout expires (anti-griefing). Contract 1's `claimPath` handles atomic claim+pay only for Tier 0-1 tasks where the low stakes don't justify the extra step.
 
 ```scala
 {
@@ -465,7 +469,17 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
 }
 ```
 
-**Bond sizing:** Bond = max(0.001 ERG, task_value × 5%). Large enough to deter abandonment, small enough that nodes aren't capital-constrained.
+**Bond sizing (tier-scaled):**
+
+| Tier | Max Task Value | Bond % | Bond Amount | Rationale |
+|------|---------------|--------|-------------|-----------|
+| 0 | 0.01 ERG | 5% | 0.0005 ERG | Minimal — low stakes |
+| 1 | 0.1 ERG | 10% | 0.01 ERG | Moderate deterrent |
+| 2 | 1 ERG | 15% | 0.15 ERG | Meaningful capital at risk |
+| 3 | 10 ERG | 25% | 2.5 ERG | Serious commitment |
+| 4 | 100 ERG | 50% | 50 ERG | Near-equal skin in the game |
+
+The bond percentage **increases with tier** because at higher values the incentive to cheat scales linearly while reputation loss is fixed. A flat 5% bond at Tier 4 would leave a 94 ERG profit from stealing a 100 ERG task — totally inadequate. At 50%, stealing a 100 ERG task yields only ~49 ERG minus destroyed reputation, making it unprofitable (see §9.7 whale-scale analysis).
 
 **Anti-griefing:** The `clientTimeout` path is critical — without it, a malicious client could claim non-delivery, wait forever, and hold the node's bond hostage. The response window (e.g., 720 blocks ≈ 24h) forces the client to act or forfeit their claim.
 
@@ -924,31 +938,51 @@ The treasury accumulates from volume, not margins. The insurance pool creates a 
 ### 6.2 Revenue Flows
 
 ```
-For a 10 ERG task:
+For a 10 ERG task (Tier 3 — escrow path):
 
 Client pays:    10 ERG (locked in service request)
                 + gas deposit (to Celaut node, separate)
-Node posts:     0.5 ERG delivery bond (returned on completion)
+Node posts:     2.5 ERG delivery bond (25% — Tier 3 rate)
 
-Node receives:  9.9 ERG (99%)
-Treasury:       0.09 ERG (0.9%)
-Insurance Pool: 0.01 ERG (0.1%)
-Bond returned:  0.5 ERG (back to node)
-Gas consumed:   Variable (goes to Celaut node operator)
-Gas refund:     Unused gas → back to client
+On claim: 10 ERG moves to Payment Resolution Box (escrow — NOT to node yet)
+On delivery confirmation by client:
+  Node receives:  9.9 ERG (99%)
+  Treasury:       0.09 ERG (0.9%)
+  Insurance Pool: 0.01 ERG (0.1%)
+  Bond returned:  2.5 ERG (back to node)
+  Gas consumed:   Variable (goes to Celaut node operator)
+  Gas refund:     Unused gas → back to client
+
+If node doesn't deliver:
+  Client flags → bond (2.5 ERG) forfeited to client
+  Escrowed 10 ERG returns to client
+  Node loses bond + reputation
 ```
 
 ### 6.3 Cost of Attack vs Benefit Analysis
+
+**Standard scale (≤10 ERG tasks):**
 
 | Attack | Cost to Attacker | Max Benefit | Ratio |
 |--------|------------------|-------------|-------|
 | Sybil (Tier 2) | ≥1 ERG + 3 days | 1 ERG (one task) | ≥1:1 |
 | Collusion ring (10 members) | ≥10 ERG value + weeks | Reputation inflation | Diminishing returns |
 | Dishonest client | rating stake + reputation | 1 free task | >2:1 |
-| Dishonest node | delivery bond + months of tier-climbing | 1 task payment | >>1:1 |
+| Dishonest node (Tier 3) | 2.5 ERG bond + escrowed payment + months of rep | Nothing (payment escrowed) | ∞:1 |
 | Reputation farming | linear cost (value-based) | — | No shortcut |
 | Front-running | — | — | Impossible (random selection) |
 | Miner manipulation | Opportunity cost of suboptimal block | 1 task selection bias | Unprofitable |
+
+**Whale scale (10-100 ERG tasks):**
+
+| Attack | Cost to Attacker | Max Benefit | Defense |
+|--------|------------------|-------------|---------|
+| Dishonest node (Tier 4, 100 ERG task) | 50 ERG bond + escrowed payment + 15000 blocks rep | Nothing — payment held in escrow until delivery confirmed | Escrow + tier-scaled bond |
+| Long con (build rep → steal one task) | 100 ERG cumulative + 21 days + 1 ERG fees | Payment escrowed — must deliver to collect | Escrow makes it pointless |
+| Whale Sybil (10,000 ERG capital) | See §9.7 Simulation 4 | Probability-limited by diversity dampening | Anti-Sybil stack |
+| Miner + whale node | 30 ERG block reward opportunity cost × blocks needed | Bias selection for one 100 ERG task | Multi-block randomness |
+
+**Why escrow changes everything:** With Tier 2+ mandatory escrow (Contract 4), the "claim and run" attack is impossible — the node never holds the payment until delivery is confirmed. The bond is now pure deterrent against wasting time (theirs and the client's), not the sole defense against theft.
 
 ### 6.4 Minimum Viable Stake
 
@@ -1247,7 +1281,196 @@ consecutive block control. Even single-block manipulation is unprofitable
 for any task worth less than the block reward (~30 ERG).
 ```
 
-### 9.8 Cross-Contract Composition Risk (eUTXO-Specific)
+**Simulation 4: Whale Sybil attack (attacker has 10,000 ERG, targets a 100 ERG Tier 4 task)**
+
+```
+Goal: Maximize probability of winning a 100 ERG task via Sybil reputation.
+Capital: 10,000 ERG (~$3,000 at $0.30/ERG, ~$500,000 at $50/ERG).
+
+Step 1: Create N Sybil identities, each needing Tier 4 status.
+        Tier 4 requires: 100 ERG cumulative + 15000 blocks (~21 days).
+        
+Step 2: Fund each identity to Tier 4. Options:
+  A) Self-dealing: Circulate ERG among own wallets.
+     100 wallets × 100 ERG cumulative = 10,000 ERG circulated.
+     Fee cost: 1% × 10,000 = 100 ERG in platform fees.
+     Time: 15000 blocks minimum (~21 days) — cannot be parallelized 
+     per identity (each needs 15000 blocks of activity).
+     
+  B) Legitimate work: Actually provide services to build rep.
+     This costs time but not ERG (you earn ERG doing real work).
+     Slower but builds legitimate-looking reputation.
+
+Step 3: After 21+ days, attacker has up to 100 Tier 4 identities.
+        Combined selection probability = 100 × rep / Σrep.
+
+Defense check:
+- Diversity factor CRUSHES self-dealing (option A):
+  Each wallet interacts with only the attacker's other wallets.
+  With 100 wallets: each has ~2-3 unique counterparties out of 99.
+  diversity_factor = 3/100 = 0.03 → effective_rep = raw × 0.03^0.5 = raw × 0.17
+  → 83% reputation reduction per identity.
+  
+- Circular detection: 100-node ring is trivially detectable.
+  Progressive dampening reduces further.
+
+- After all dampening: 100 identities × 0.17 effective rep each ≈ 
+  17 "effective identities" worth of reputation.
+  Against a network with 50 honest Tier 4 nodes (each with 
+  diversity_factor ~0.8 → effective rep = raw × 0.89):
+  Attacker's share ≈ 17 / (17 + 50×0.89) ≈ 17 / 61.5 ≈ 28%.
+
+- Even at 28%: this is a PROBABILITY, not a guarantee.
+  72% of the time, an honest node wins. And:
+  
+- CRITICAL: Even if attacker wins, payment is ESCROWED.
+  To collect 99 ERG, attacker must actually deliver the service.
+  If they don't deliver: lose 50 ERG bond (Tier 4 rate = 50%) 
+  + payment returns to client + all 100 identities flagged.
+  
+- Net cost of failed attempt: 100 ERG fees + 50 ERG bond + 
+  21 days + 100 identities burned = ~150 ERG + massive time.
+- Net gain of stealing: 0 ERG (payment is escrowed, never released).
+
+Result: DEFENSE HOLDS. Escrow makes the attack pointless even if 
+selection is won. The Sybil investment is pure waste. The attacker 
+spent 100 ERG in fees and 21 days to win a 28% chance at... 
+delivering a service legitimately (the only way to get paid).
+```
+
+**Simulation 5: The Long Con (patient attacker, 10,000 ERG, targets a single 100 ERG task)**
+
+```
+Goal: Build LEGITIMATE reputation over months, then steal one massive task.
+
+Step 1: Operate honestly for 6 months as a real node.
+        Complete 500+ tasks across all tiers, diverse counterparties.
+        Build Tier 4 status with high reputation, high diversity score.
+        Cost: 6 months of compute + electricity. Revenue: earned back 
+        through legitimate task payments (possibly net positive).
+
+Step 2: Win a 100 ERG task through legitimate high reputation.
+        P(winning) is high — legitimately earned reputation.
+
+Step 3: Claim task, post 50 ERG bond (Tier 4 rate).
+        Payment moves to escrow (Payment Resolution Box).
+
+Step 4: Attempt to steal.
+  Option A: Don't deliver. 
+    → Client flags. Bond (50 ERG) forfeited. 
+    → Escrowed payment (100 ERG) returns to client.
+    → Net: LOSE 50 ERG + 6 months reputation destroyed.
+    
+  Option B: Deliver garbage.
+    → For deterministic service: re-execution proves fraud. 
+      Automatic penalty. Lose bond + reputation.
+    → For non-deterministic: client rates negative.
+      Cross-validation triggered. If fraud detected: lose bond + rep.
+      If fraud not detected: gain 99 ERG but reputation damaged.
+      Future earning potential destroyed.
+
+Step 5: Economic analysis of Option B (non-deterministic, fraud undetected):
+  Gain: 99 ERG (one task payment)
+  Loss: 50 ERG bond + future earnings.
+  A Tier 4 node earning 5% of tasks at avg 10 ERG/task, 
+  10 tasks/day = 0.5 tasks/day × 9.9 ERG = ~5 ERG/day.
+  6 months remaining honest earnings ≈ 900 ERG.
+  Fraud NPV: 99 - 50 - 900 = -851 ERG.
+
+Result: DEFENSE HOLDS. The long con is irrational because:
+1. Escrow prevents immediate theft.
+2. The bond makes non-delivery expensive.
+3. Destroyed reputation costs far more in future earnings 
+   than any single task is worth.
+4. For deterministic services: fraud is provable, attack is impossible.
+5. Rational node: "I've built a 5 ERG/day income stream. 
+   Why would I burn it for 49 ERG net?"
+```
+
+**Simulation 6: Coordinated cartel attack (5 well-funded actors, 50,000 ERG total)**
+
+```
+Goal: Monopolize high-value tasks on the platform.
+
+Step 1: 5 actors each build legitimate Tier 4 reputation over 3+ months.
+        Each operates honestly, builds diverse counterparties.
+        Total capital deployed: 50,000 ERG across the group.
+
+Step 2: Cartel members accumulate significant share of total Tier 4 
+        reputation. In a network of 50 Tier 4 nodes, 5 cartel members 
+        = 10% of nodes. But with higher-than-average reputation 
+        (they invested heavily): maybe 20-30% of selection probability.
+
+Step 3: Attack vector A — Price manipulation:
+  Cartel members claim tasks and deliver, but at inflated gas prices.
+  Defense: Clients choose gas price in the service request. Nodes 
+  compete on gas pricing. Cartel would need >50% of qualifying nodes 
+  to force clients to accept inflated prices. At 10% of nodes, 
+  clients simply get served by the other 90%.
+  Result: FAILS — insufficient market share.
+
+Step 4: Attack vector B — Reputation sabotage:
+  Cartel members systematically rate honest competitors negatively 
+  when they interact as clients.
+  Defense: 
+  - Commit-reveal prevents strategic rating (can't see node's rating first).
+  - Stake-to-rate-negative: each false negative costs staked ERG.
+  - Statistical anomaly detection: 5 actors all rating the same 
+    nodes negatively = obvious cluster, auto-dampened.
+  - Cross-validation can disprove false negative ratings.
+  Cost: 5 actors × Y ERG stake per false rating × many ratings = expensive.
+  Result: FAILS — too expensive and too detectable.
+
+Step 5: Attack vector C — Selective non-delivery for competitors' clients:
+  Cartel wins tasks from specific high-value clients, delivers garbage 
+  to drive them away from the platform.
+  Defense:
+  - Escrow: payment not released. Cartel loses bonds.
+  - Bond at Tier 4 = 50%: each sabotage attempt costs 50% of task value.
+  - Reputation damage: each failed delivery hurts cartel's rep.
+  - 10 sabotage attempts at avg 50 ERG task = 250 ERG in lost bonds.
+  Result: FAILS — self-destructive. Cartel burns its own reputation 
+  and capital faster than it damages competitors.
+
+Step 6: Attack vector D — Corner the market legitimately:
+  Cartel members operate honestly but aggressively, undercutting on 
+  gas price to win more tasks and build more reputation.
+  Defense: This is... just competition. This is the system working 
+  as intended. If they provide good service at low prices, everyone 
+  benefits. The weighted random selection ensures they can't capture 
+  100% even with high reputation.
+  Result: NOT AN ATTACK — this is market competition.
+
+Overall cartel result: No viable attack vector. The escrow system, 
+tier-scaled bonds, and reputation-proportional (not winner-take-all) 
+selection make coordinated attacks either unprofitable, detectable, 
+or indistinguishable from legitimate competition.
+```
+
+### 9.8 Whale-Scale Economic Limits
+
+**Does the tier system hold at whale scale?**
+
+The current Tier 4 cap is 100 ERG. The system intentionally does NOT support tasks >100 ERG in v1. Reasoning:
+
+1. **100 ERG is significant** — at $0.30/ERG = $30, at $50/ERG = $5,000. This covers the vast majority of compute tasks.
+2. **Tasks >100 ERG should be split.** A 5,000 ERG job is really 50 × 100 ERG subtasks, with progress payments along the way. Splitting reduces single-point-of-failure risk for both parties.
+3. **If we ever need Tier 5+:** The governance mechanism (treasury multi-sig config contract, §9.4) can add higher tiers with even stricter requirements — e.g., Tier 5: max 1000 ERG, 1000 ERG cumulative, 50000 blocks (~70 days), 75% bond. But this should be demand-driven, not speculative.
+
+**Does the delivery bond create enough deterrent?**
+
+With tier-scaled bonds (5% → 50% as tiers increase), the deterrent math at Tier 4:
+- Steal attempt on 100 ERG task: lose 50 ERG bond + payment returns to client (escrowed) = net loss of 50 ERG + reputation.
+- Honest completion: earn 99 ERG + keep bond + keep/grow reputation.
+- The honest payoff exceeds the dishonest payoff by **149 ERG** (99 earned vs -50 lost). Deterrent ratio: ~3:1 in favor of honesty.
+
+**Can someone build massive reputation specifically to win one huge task?**
+
+Yes — and they should! Building massive reputation means months of reliable service delivery. By the time they can win a 100 ERG task, they have a proven track record and a profitable business. The "one big heist" is irrational because escrow means they can't take the money without delivering, and their ongoing income stream exceeds any single-task theft (see Simulation 5).
+
+**The ultimate defense is architectural:** Payment escrow for Tier 2+ means the node NEVER has the client's money until delivery is confirmed. You can't steal what you never hold. The bond is additional deterrent on top of an already-secure base.
+
+### 9.9 Cross-Contract Composition Risk (eUTXO-Specific)
 
 Ergo's eUTXO model allows composing transactions that interact with multiple contracts simultaneously. Potential risks:
 - A malicious transaction could reference an EGO box as a data input while simultaneously spending it in another input — the data input would reflect stale state. **Mitigation:** Data inputs are read at transaction validation time from the UTXO set, so a box cannot be both a data input and a regular input in the same transaction (Ergo protocol rule).
@@ -1271,7 +1494,7 @@ Ergo's eUTXO model allows composing transactions that interact with multiple con
 
 **Q5: Gas pricing and reputation.** Should higher-reputation nodes charge more, or should reputation only gate access?
 
-**Q6: Weighted random selection.** We've implemented probability-proportional selection (P = rep_i / Σrep) with multi-block randomness for manipulation resistance (§3.13). The adversarial simulations in §9.7 show this holds against a 100 ERG attacker. Do you see edge cases we missed — particularly with Ergo's block header structure?
+**Q6: Weighted random selection.** We've implemented probability-proportional selection (P = rep_i / Σrep) with multi-block randomness for manipulation resistance (§3.13). The adversarial simulations in §9.7 show this holds from 100 ERG to 50,000 ERG whale-scale attackers. Do you see edge cases we missed — particularly with Ergo's block header structure?
 
 **Q7: Batched ratings.** The off-chain commit + batched settlement pattern reduces per-task cost from ~0.004 ERG to ~0.0001 ERG. Does this work with Ergo's multi-input transaction limits?
 
