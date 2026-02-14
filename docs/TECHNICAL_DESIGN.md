@@ -17,6 +17,14 @@
 
 **Constraints:** Zero backends (Ergo + Celaut P2P only). eUTXO model (R4-R9). Compatible with Josemi's gas model.
 
+**Services:** Identified by content hash (Celaut architecture). Same hash = same code = deterministic container. A service is just a binary — download by hash, execute, verify output.
+
+**Reputation model (from Josemi's Game of Prompts):** Reputation has two components:
+1. **On-chain stake** — ERG burned/sacrificed. Skin in the game.
+2. **Off-chain verifiable history** — every past interaction is public and reproducible. Anyone can inspect a node's history and replay deterministic tasks to verify they were honest.
+
+"Alice won't burn tokens and then post something anyone can disprove." The cost of lying must always exceed the benefit.
+
 **Security principle:** Make fraud unprofitable, not impossible. Same as Bitcoin.
 
 ---
