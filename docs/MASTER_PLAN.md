@@ -1723,7 +1723,7 @@ Game theory: a 20-person conspiracy requires:
   - Total capital: 20 × 2,000 = 40,000 ERG committed
 
 Even if they build reputation:
-  - Payment the payment contract means they must deliver to collect
+  - Contract-locked payment means they must deliver to collect
   - Each "attack" (non-delivery) costs 50% bond at Tier 4
   - One exposed member can burn the entire ring
 
@@ -2046,7 +2046,7 @@ No oracle dependency. Quarterly review cadence.
 
 *\*Held before fixes but with thinner margins. Fixes provide comfortable safety margin.*
 
-**The fundamental insight:** The contract stack is the unbreakable foundation. Every whale-scale attack ultimately fails because the attacker never holds the payment until delivery is confirmed. Bonds, reputation, and detection layers are defense-in-depth — but reputation-gated smart contracts are the wall. You can't steal what you never hold.
+**The fundamental insight:** Reputation is the wall. In Josemi's gas model, clients lock ERG into smart contracts with reputation-gated conditions — the node never holds the payment until delivery is confirmed. Every whale-scale attack ultimately fails because the rational move is always honest execution: the ongoing income stream from maintained reputation exceeds any single-task theft. This is the folk theorem in action (Fudenberg & Maskin, 1986) — cooperation is sustained by the threat of future punishment, not by holding funds hostage. Bonds, detection layers, and contract-locked payments are defense-in-depth, but reputation is the foundation.
 
 ---
 
@@ -2100,6 +2100,7 @@ No oracle dependency. Quarterly review cadence.
 | VCG mechanism | Vickrey-Clarke-Groves | Future: private bidding |
 | Zero-knowledge proofs | Goldwasser et al. (1985) | Sigma protocol reputation |
 | Proportional selection | Kiayias et al. (2017) | Weighted random node selection |
+| Folk theorem (repeated games) | Fudenberg & Maskin (1986) | Reputation as sustained cooperation mechanism |
 
 ## Appendix B: ErgoScript Registers Quick Reference
 
