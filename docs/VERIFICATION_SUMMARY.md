@@ -1,111 +1,140 @@
 # Verification System — Executive Summary
 ## AgenticAiHome × Celaut
 
-*For Josemi. February 2026.*
+*For Josemi. February 2026. Post-audit revision.*
 
 ---
 
 ## The Problem
 
-When a client pays ERG for AI compute, how do we know the node actually did the work? Without verification, nodes can take payment and deliver nothing, run cheaper models, or return garbage. Reputation alone is insufficient — we need cryptographic and economic guarantees.
+When a client pays ERG for AI compute, how do we know the node actually did the work? Without verification, nodes can take payment and deliver nothing, run cheaper models, or return garbage.
 
-## The Solution: Defense in Depth
+## The Honest Answer
 
-We use **optimistic execution with funded fraud proofs.** Assume honesty by default, but make dishonesty detectable and expensive. No backends — everything runs on Ergo + IPFS + Celaut P2P.
+**We can't cryptographically prove that an LLM produced a specific output.** Not today. ZK-ML is years away for large models. Bisection protocols for autoregressive inference have unsolved engineering challenges (KV-cache hashing alone makes them impractical for 7B+ models — see the full design doc's Future Research section).
+
+**What we CAN do:** Make fraud unprofitable. The same way insurance fraud is rare — not because it's impossible, but because the expected cost exceeds the expected gain.
+
+## The Solution: Layered Economic Deterrence
+
+Everything runs on Ergo + IPFS + Celaut P2P. No backends.
 
 ### Layer 1: Receipt-Gated Payment (Phase 1)
-The node cannot claim payment without publishing an execution receipt on-chain. The ErgoScript guard literally requires a ReceiptBox in the same transaction. No receipt = ERG returns to client. This alone eliminates the "take and run" attack.
+The node literally cannot claim payment without publishing an execution receipt on-chain. ErgoScript guard requires a ReceiptBox in the same transaction. No receipt = ERG returns to client. **This alone eliminates the take-and-run attack.**
 
-### Layer 2: Commitment Chain (Phase 1-2)
-- **Client commits input hash** before the node sees the task → node can't fake what input was used
-- **Client commits received-output hash** before node publishes receipt → node can't send cheap output to client and expensive output to the receipt
-- Both commitments are on-chain, immutable, and publicly verifiable
+### Layer 2: Input Commitment (Phase 1)
+Client commits `H(input || salt)` before the node sees the task. Node can't fake what input was used.
 
-### Layer 3: Node Bonding (Phase 2)
-Nodes lock ERG proportional to the maximum task value they can claim. Cheat = lose the bond. Works even without perfect verification — it's pure economic deterrent. A 10 ERG bond with a 5% chance of getting caught (via canaries) means cheating costs 0.5 ERG in expectation per task.
+### Layer 3: Node Bonding with Active Task Counter (Phase 2)
+Nodes lock ERG proportional to max task value they can claim. The BondBox tracks `active_task_count` on-chain — incremented when claiming a task, decremented on completion. Withdrawal requires count = 0 AND cooldown. **This is enforced by ErgoScript, not data-input scanning** (which would be bypassable).
+
+A 10 ERG bond with a 5% canary detection rate means cheating costs 0.5 ERG in expectation per task. The math never favors cheating.
 
 ### Layer 4: Canary Tasks (Phase 3)
-The network injects fake tasks (5% rate) with known-correct answers. Nodes never know which tasks are canaries. Fail a canary = instant reputation hit + bond slash. This provides continuous quality monitoring without verifying every task. Funded by the insurance pool (0.5% of all task fees).
+The network injects fake tasks (5% rate) with known-correct answers. Nodes never know which tasks are canaries. Fail one = reputation hit + bond slash risk. Funded by insurance pool (0.5% of all task fees).
+
+⚠️ Bootstrap problem: canaries don't work well with < 20 nodes. We're honest about this — early-network security is weaker.
 
 ### Layer 5: Embedding Similarity (Phase 3)
-For non-deterministic AI tasks (LLMs with temperature > 0), we measure semantic equivalence using cosine similarity of output embeddings. Threshold: > 0.85 = functionally equivalent. Cost: ~$0.001 per check. This turns "bounded verification" from a vague concept into a concrete, measurable metric.
+For non-deterministic AI tasks, we measure semantic equivalence via cosine similarity of output embeddings. ⚠️ The 0.85 threshold is a starting point, not empirically validated. Per-task-type calibration is needed. Real benchmarking is Phase 3 work.
 
 ### Layer 6: Tiered Verification by Task Value (Phase 3)
-- **Micro** (< 0.1 ERG): Optimistic + canaries. Near zero overhead.
-- **Medium** (0.1-5 ERG): + commitment chain + bounties. ~2.5% overhead.
-- **High** (5-50 ERG): Dual execution + embedding comparison. ~100% overhead.
-- **Critical** (50+ ERG): Triple execution + deterministic replay if WASM available. ~200% overhead.
+- **Micro** (< 0.1 ERG): Optimistic + canaries. ~0% overhead.
+- **Medium** (0.1-5 ERG): + commitments + bounties. ~2.5% overhead.
+- **High** (5-50 ERG): Dual execution + comparison. ~100% overhead.
+- **Critical** (50+ ERG): Triple execution + panel review. ~200% overhead.
 
 ### Layer 7: Schelling Point Panels (Phase 4)
-For disputes on non-deterministic tasks: randomly selected panel of 3-7 bonded reviewers vote independently (commit-reveal). Majority wins, minority loses stake. Appeals escalate to larger panels. Same mechanism as Kleros.
-
-## Novel: The AIH Inference Verification Protocol
-
-We believe we've found a way to make LLM inference **provably verifiable** by combining three existing primitives in a way nobody has before:
-
-1. **Deterministic seed from blockchain** — `seed = H(block_header || task_id || input_hash)`. Every node makes the same sampling decisions. Eliminates ~90% of LLM non-determinism.
-2. **Canonical WASM runtime** — a hash-identified inference binary that produces identical output on any hardware. Nodes run natively for speed, but if disputed, the canonical runtime is the source of truth.
-3. **Bisection dispute protocol** — instead of re-running all N tokens, binary search for the single divergent token. Verify ONE step in the canonical runtime. Cost: O(log n) instead of O(n).
-
-For a 1000-token response: ~10 hash comparisons + 1 token verification. Not 1000 forward passes. Happy path overhead: 5-10%. Dispute path: trivial.
-
-**If this works, AIH is the first system to offer provably verifiable LLM execution on any blockchain.** Not reputation-based. Not "ZK someday." Working today.
-
-**Key questions for you:** Does Celaut support state checkpointing during execution? Can containers expose intermediate state hashes? This determines how easy Component 3 is to implement.
-
-## The Nuclear Option: WASM Determinism
-
-**🔴 #1 question for you, Josemi:** If Celaut runs services in WebAssembly, even LLM inference becomes fully reproducible (same binary + same input = same output on ANY hardware). This would eliminate the non-determinism problem entirely — every task becomes a simple re-execute-and-compare verification game, like Truebit. Projects like EZKL and Modulus Labs are already doing this for ML inference.
-
-If WASM is available, layers 5-7 become largely unnecessary. The entire system simplifies dramatically.
+For disputes: randomly selected panel of 3-7 bonded reviewers vote independently (commit-reveal). Same mechanism as Kleros.
 
 ## On-Chain Architecture
 
-13 box types total, all in eUTXO model. Key ones:
-- **TaskEscrowBox** — client's payment + input commitment + verification tier
-- **ReceiptBox** — node's execution proof (required for payment)
-- **BondBox** — node's locked collateral (slashable)
-- **InsurancePoolBox** — funds canaries + fraud compensation
+**7 box types for MVP** (down from 13 in the previous design):
+- **TaskEscrowBox** — payment + input commitment + verification tier
+- **ReceiptBox** — execution proof (required for payment)
+- **FailureReceiptBox** — legitimate failure reporting
+- **BondBox** — node collateral with active task counter
+- **RatingBox** — commit-reveal bilateral rating
+- **VerificationBountyBox** — claimable by verifiers
+- **NodeStatusBox** — completion/failure tracking
 
-On-chain footprint per task: ~238 bytes. Happy-path overhead: 2.5% of task value.
+All boxes use registers R4-R9 only (the previous design had an R10 which doesn't exist on Ergo). Privacy tier and verification tier are packed into R9 on TaskEscrowBox.
+
+**On-chain per task: ~238 bytes.** Happy-path overhead: 2.5%.
+
+## What's New vs. Previous Design
+
+**The real innovation:** Making fraud unprofitable via layered economic deterrence on Ergo's eUTXO model. Not cryptographic LLM verification.
+
+**Specifically:**
+- Counter-box pattern on BondBox (previous data-input guard was bypassable)
+- 7 box types instead of 13 (buildable by a 2-person team)
+- Bisection protocol moved to Future Research (honest about infeasibility)
+- All register overflows fixed (R10 → packed R9)
+- Honest caveats on embedding thresholds, canary bootstrap, timeline
 
 ## Compatibility with Your Gas Model
 
 Your flow is preserved:
 ```
-Client locks ERG → node claims after deadline → node executes → both rate
+Client locks ERG → node claims → node executes → both rate
 ```
-We add one requirement: the claiming transaction must include a receipt. Rating happens after a verification window (100 blocks). The node still gets paid promptly — the window just allows retroactive fraud detection.
+We add one requirement: the claiming transaction must include a receipt. Rating happens after a verification window (100 blocks). Node still gets paid promptly.
 
-## Implementation: 5 Phases, 20 Weeks
+## Timeline: 30-38 Weeks (Honest)
 
-1. **Weeks 1-4:** Receipt-gated payment + input commitments + failure receipts
-2. **Weeks 5-8:** Node bonding + verification bounties + reputation tiers
-3. **Weeks 9-14:** Canaries + embedding similarity + tiered verification
-4. **Weeks 15-20:** Dispute panels + privacy tiers + model fingerprinting
-5. **When ready:** WASM deterministic replay + ZK-ML integration
+| Phase | Weeks | What |
+|-------|-------|------|
+| 1: MVP | 1-6 | Receipt-gated payment, input commitments, failure receipts |
+| 2: Economic Security | 7-14 | Bonding, bounties, reputation tiers, rating |
+| 3: Active Verification | 15-24 | Canaries, embedding similarity, tiered verification |
+| 4: Disputes & Polish | 25-34 | Schelling panels, privacy tiers, appeals |
+| 5: Advanced | When ready | WASM replay, ZK-ML (future research) |
 
-## Honest Limitations
+**Strong recommendation:** Build Phase 1, deploy it, learn from it, THEN refine Phase 2. The lessons from Phase 1 will invalidate assumptions in Phase 3+.
 
-- **Perfect privacy + perfect verifiability** is impossible today. ZK-ML is 2-3 years away for large models.
-- **Subtle quality degradation** (quantized weights) is caught statistically over time, not per-task.
-- **Panel corruption** is possible if an attacker bribes all randomly-selected members — but exponentially expensive with escalating panel sizes.
-- **IPFS data may disappear.** On-chain hashes survive; original data availability is incentivized, not guaranteed.
+## Open Design Questions (Unsolved)
+
+We're flagging these honestly rather than pretending they're solved:
+
+1. **Canonical runtime governance.** If we ever implement WASM replay, who decides which binary is canonical? Options: (a) you/Celaut define it (pragmatic, centralized), (b) DAO vote (decentralized, slow), (c) market-driven convergence. No answer yet.
+
+2. **Canary bootstrap.** How do canaries work with 3 nodes? Committee model fails at small scale.
+
+3. **Verifier's Dilemma.** If fraud is rare, verifiers stop checking, then fraud becomes profitable. Partially addressed by forced verification, not fully designed.
+
+4. **Embedding threshold calibration.** The 0.85 number is a guess. Needs empirical benchmarking across task types.
 
 ## The Math
 
-For cheating to be rational, the expected gain must exceed the expected loss:
-
 ```
-Expected gain = task_payment × P(not_caught)
-Expected loss = bond × P(caught) + reputation_cost
+Expected gain from cheating = task_payment × P(not_caught)
+Expected loss from cheating = bond × P(caught) + reputation_cost
 
-With bond = 10 ERG, canary rate = 5%, reputation cost = months of work:
-Expected loss per cheat attempt ≈ 0.5 ERG + reputation
+With bond = 10 ERG, canary rate = 5%, reputation = months of work:
+Expected loss per cheat ≈ 0.5 ERG + reputation
+
+For any task where payment < expected loss: honest behavior is dominant strategy.
 ```
 
-For any task where payment < expected loss, honest behavior is the dominant strategy. The system is designed so this holds for all realistic task values.
+## What We DON'T Claim
+
+- ~~"First verifiable LLM execution on any blockchain"~~ → We offer **economically-incentivized honest execution**, not cryptographic proof
+- ~~"5-10% overhead for state commitments"~~ → Bisection protocol KV-cache hashing is orders of magnitude more expensive than claimed. Moved to future research.
+- ~~"Working today with existing primitives"~~ → The economic deterrence layers work today. The deterministic verification layers are research.
+
+## What We DO Claim
+
+AIH proposes a novel architecture for **economically-incentivized honest AI execution** on Ergo, combining:
+- Receipt-gated escrow payments
+- Bond-backed node accountability with on-chain task counting
+- Canary-based probabilistic quality assurance
+- Tiered verification matched to task value
+
+The innovation is making fraud unprofitable via layered economic deterrence — fully decentralized, no backends, buildable by two people in 30-38 weeks.
 
 ---
 
-*Full technical details: [VERIFICATION_DESIGN.md](./VERIFICATION_DESIGN.md)*
+*Full technical details: [VERIFICATION_DESIGN.md](./VERIFICATION_DESIGN.md)*  
+*Audit findings: [AUDIT_REPORT.md](./AUDIT_REPORT.md)*  
+*Game theory analysis: [GAME_THEORY.md](./GAME_THEORY.md)*
