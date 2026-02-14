@@ -133,7 +133,7 @@ We need 7 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 **⚠️ Critical: Payment timing depends on task value.**
 - **Tier 0-1 (≤0.1 ERG):** Atomic claim+pay via `claimPath` below. Bond optional. Low stakes make the UX-simplicity tradeoff acceptable.
-- **Tier 2+ (>0.1 ERG):** Claim creates a **Payment Resolution Box** (Contract 4) holding the payment in escrow. Payment releases only after delivery confirmation via the **Delivery Bond** (Contract 6). This prevents the "claim and run" attack at scale.
+- **Tier 2+ (>0.1 ERG):** Claim creates a **Payment Resolution Box** (Contract 4) that locks the payment in a smart contract with delivery conditions. Payment resolves only after the client confirms delivery via the **Delivery Bond** (Contract 6), or after client timeout (anti-griefing). This prevents the "claim and run" attack at scale.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -379,7 +379,7 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
 
 ### Contract 4: Payment Resolution Box
 
-**Purpose:** Holds payment in escrow until delivery is confirmed. **Mandatory for Tier 2+ tasks** (>0.1 ERG). Payment releases only when the client confirms delivery via the Delivery Bond contract (Contract 6), or when the client timeout expires (anti-griefing). Contract 1's `claimPath` handles atomic claim+pay only for Tier 0-1 tasks where the low stakes don't justify the extra step.
+**Purpose:** Smart contract that locks payment with delivery conditions — the on-chain enforcement layer of the gas model. **Mandatory for Tier 2+ tasks** (>0.1 ERG). Payment resolves when the client confirms delivery via the Delivery Bond contract (Contract 6), or automatically after client timeout (anti-griefing). Contract 1's `claimPath` handles atomic claim+pay only for Tier 0-1 tasks where the low stakes don't justify the extra step.
 
 ```scala
 {
@@ -853,7 +853,7 @@ For non-deterministic services:
 
 | Layer | Mechanism | What It Prevents |
 |-------|-----------|-----------------|
-| 1. Escrow-Gated | Can only rate after real payment + execution | Fake reviews |
+| 1. Payment-Gated | Can only rate after real payment + execution | Fake reviews |
 | 2. Value-Weighted | Higher-value tasks = more reputation impact | Micro-task farming |
 | 3. Repeat-Dampened | k-th interaction with same party: weight 1/k | Self-dealing rings |
 | 4. Outlier-Dampened | Extreme raters (all 5s or all 1s) downweighted | Manipulation bots |
@@ -943,13 +943,13 @@ The treasury accumulates from volume, not margins. The insurance pool creates a 
 ### 6.2 Revenue Flows
 
 ```
-For a 10 ERG task (Tier 3 — escrow path):
+For a 10 ERG task (Tier 3 — contract-locked payment path):
 
 Client pays:    10 ERG (locked in service request)
                 + gas deposit (to Celaut node, separate)
 Node posts:     2.5 ERG delivery bond (25% — Tier 3 rate)
 
-On claim: 10 ERG moves to Payment Resolution Box (escrow — NOT to node yet)
+On claim: 10 ERG moves to Payment Resolution Box (contract-locked — NOT to node yet)
 On delivery confirmation by client:
   Node receives:  9.9 ERG (99%)
   Treasury:       0.09 ERG (0.9%)
@@ -960,7 +960,7 @@ On delivery confirmation by client:
 
 If node doesn't deliver:
   Client flags → bond (2.5 ERG) forfeited to client
-  Escrowed 10 ERG returns to client
+  Locked 10 ERG returns to client
   Node loses bond + reputation
 ```
 
@@ -973,7 +973,7 @@ If node doesn't deliver:
 | Sybil (Tier 2) | ≥1 ERG + 3 days | 1 ERG (one task) | ≥1:1 |
 | Collusion ring (10 members) | ≥10 ERG value + weeks | Reputation inflation | Diminishing returns |
 | Dishonest client | rating stake + reputation | 1 free task | >2:1 |
-| Dishonest node (Tier 3) | 2.5 ERG bond + escrowed payment + months of rep | Nothing (payment escrowed) | ∞:1 |
+| Dishonest node (Tier 3) | 2.5 ERG bond + contract-locked payment + months of rep | Nothing (payment locked in contract) | ∞:1 |
 | Reputation farming | linear cost (value-based) | — | No shortcut |
 | Front-running | — | — | Impossible (random selection) |
 | Miner manipulation | Opportunity cost of suboptimal block | 1 task selection bias | Unprofitable |
@@ -982,12 +982,12 @@ If node doesn't deliver:
 
 | Attack | Cost to Attacker | Max Benefit | Defense |
 |--------|------------------|-------------|---------|
-| Dishonest node (Tier 4, 100 ERG task) | 50 ERG bond + escrowed payment + 15000 blocks rep | Nothing — payment held in escrow until delivery confirmed | Escrow + tier-scaled bond |
-| Long con (build rep → steal one task) | 100 ERG cumulative + 21 days + 1 ERG fees | Payment escrowed — must deliver to collect | Escrow makes it pointless |
+| Dishonest node (Tier 4, 100 ERG task) | 50 ERG bond + contract-locked payment + 15000 blocks rep | Nothing — payment locked in contract until delivery confirmed | Contract enforcement + tier-scaled bond |
+| Long con (build rep → steal one task) | 100 ERG cumulative + 21 days + 1 ERG fees | Payment contract-locked — must deliver to collect | Contract lock makes it pointless |
 | Whale Sybil (10,000 ERG capital) | See §9.7 Simulation 4 | Probability-limited by diversity dampening | Anti-Sybil stack |
 | Miner + whale node | 30 ERG block reward opportunity cost × blocks needed | Bias selection for one 100 ERG task | Multi-block randomness |
 
-**Why escrow changes everything:** With Tier 2+ mandatory escrow (Contract 4), the "claim and run" attack is impossible — the node never holds the payment until delivery is confirmed. The bond is now pure deterrent against wasting time (theirs and the client's), not the sole defense against theft.
+**Why contract-locked payment changes everything:** With Tier 2+ mandatory payment resolution (Contract 4), the "claim and run" attack is impossible — the node never holds the payment until delivery is confirmed. The bond is pure deterrent against wasting time (theirs and the client's), not the sole defense against theft. This is the gas model in action: you lock resources into a smart contract, conditions are enforced on-chain, and payment resolves deterministically.
 
 ### 6.4 Minimum Viable Stake
 
@@ -1129,7 +1129,7 @@ No manual minting. No privileged genesis participants. No admin keys. Fully perm
 
 **Deliverables:**
 - [ ] End-to-end flow: AIH request → Celaut execution → on-chain settlement
-- [ ] Gas deposit bridge (AIH escrow → Celaut gas payment)
+- [ ] Gas deposit bridge (AIH payment contract → Celaut gas payment)
 - [ ] Service hash discovery (browsing available Celaut services)
 - [ ] Output hash publication on-chain
 - [ ] Deterministic verification (re-execution check via insurance pool)
@@ -1328,18 +1328,18 @@ Defense check:
 - Even at 28%: this is a PROBABILITY, not a guarantee.
   72% of the time, an honest node wins. And:
   
-- CRITICAL: Even if attacker wins, payment is ESCROWED.
+- CRITICAL: Even if attacker wins, payment is CONTRACT-LOCKED.
   To collect 99 ERG, attacker must actually deliver the service.
   If they don't deliver: lose 50 ERG bond (Tier 4 rate = 50%) 
   + payment returns to client + all 100 identities flagged.
   
 - Net cost of failed attempt: 100 ERG fees + 50 ERG bond + 
   21 days + 100 identities burned = ~150 ERG + massive time.
-- Net gain of stealing: 0 ERG (payment is escrowed, never released).
+- Net gain of stealing: 0 ERG (payment locked in contract, never released).
 
-Result: DEFENSE HOLDS. Escrow makes the attack pointless even if 
-selection is won. The Sybil investment is pure waste. The attacker 
-spent 100 ERG in fees and 21 days to win a 28% chance at... 
+Result: DEFENSE HOLDS. Contract-locked payment makes the attack 
+pointless even if selection is won. The Sybil investment is pure waste. 
+The attacker spent 100 ERG in fees and 21 days to win a 28% chance at... 
 delivering a service legitimately (the only way to get paid).
 ```
 
@@ -1358,12 +1358,12 @@ Step 2: Win a 100 ERG task through legitimate high reputation.
         P(winning) is high — legitimately earned reputation.
 
 Step 3: Claim task, post 50 ERG bond (Tier 4 rate).
-        Payment moves to escrow (Payment Resolution Box).
+        Payment moves to Payment Resolution Box (contract-locked).
 
 Step 4: Attempt to steal.
   Option A: Don't deliver. 
     → Client flags. Bond (50 ERG) forfeited. 
-    → Escrowed payment (100 ERG) returns to client.
+    → Contract-locked payment (100 ERG) returns to client.
     → Net: LOSE 50 ERG + 6 months reputation destroyed.
     
   Option B: Deliver garbage.
@@ -1383,7 +1383,7 @@ Step 5: Economic analysis of Option B (non-deterministic, fraud undetected):
   Fraud NPV: 99 - 50 - 900 = -851 ERG.
 
 Result: DEFENSE HOLDS. The long con is irrational because:
-1. Escrow prevents immediate theft.
+1. Contract-locked payment prevents immediate theft.
 2. The bond makes non-delivery expensive.
 3. Destroyed reputation costs far more in future earnings 
    than any single task is worth.
@@ -1430,7 +1430,7 @@ Step 5: Attack vector C — Selective non-delivery for competitors' clients:
   Cartel wins tasks from specific high-value clients, delivers garbage 
   to drive them away from the platform.
   Defense:
-  - Escrow: payment not released. Cartel loses bonds.
+  - Contract-locked payment: not released. Cartel loses bonds.
   - Bond at Tier 4 = 50%: each sabotage attempt costs 50% of task value.
   - Reputation damage: each failed delivery hurts cartel's rep.
   - 10 sabotage attempts at avg 50 ERG task = 250 ERG in lost bonds.
@@ -1446,10 +1446,10 @@ Step 6: Attack vector D — Corner the market legitimately:
   100% even with high reputation.
   Result: NOT AN ATTACK — this is market competition.
 
-Overall cartel result: No viable attack vector. The escrow system, 
-tier-scaled bonds, and reputation-proportional (not winner-take-all) 
-selection make coordinated attacks either unprofitable, detectable, 
-or indistinguishable from legitimate competition.
+Overall cartel result: No viable attack vector. The contract-enforced 
+payment resolution, tier-scaled bonds, and reputation-proportional 
+(not winner-take-all) selection make coordinated attacks either 
+unprofitable, detectable, or indistinguishable from legitimate competition.
 ```
 
 ### 9.8 Whale-Scale Economic Limits
@@ -1465,15 +1465,15 @@ The current Tier 4 cap is 100 ERG. The system intentionally does NOT support tas
 **Does the delivery bond create enough deterrent?**
 
 With tier-scaled bonds (5% → 50% as tiers increase), the deterrent math at Tier 4:
-- Steal attempt on 100 ERG task: lose 50 ERG bond + payment returns to client (escrowed) = net loss of 50 ERG + reputation.
+- Steal attempt on 100 ERG task: lose 50 ERG bond + payment returns to client (contract-locked) = net loss of 50 ERG + reputation.
 - Honest completion: earn 99 ERG + keep bond + keep/grow reputation.
 - The honest payoff exceeds the dishonest payoff by **149 ERG** (99 earned vs -50 lost). Deterrent ratio: ~3:1 in favor of honesty.
 
 **Can someone build massive reputation specifically to win one huge task?**
 
-Yes — and they should! Building massive reputation means months of reliable service delivery. By the time they can win a 100 ERG task, they have a proven track record and a profitable business. The "one big heist" is irrational because escrow means they can't take the money without delivering, and their ongoing income stream exceeds any single-task theft (see Simulation 5).
+Yes — and they should! Building massive reputation means months of reliable service delivery. By the time they can win a 100 ERG task, they have a proven track record and a profitable business. The "one big heist" is irrational because the payment is contract-locked — they can't take the money without delivering, and their ongoing income stream exceeds any single-task theft (see Simulation 5).
 
-**The ultimate defense is architectural:** Payment escrow for Tier 2+ means the node NEVER has the client's money until delivery is confirmed. You can't steal what you never hold. The bond is additional deterrent on top of an already-secure base.
+**The ultimate defense is architectural:** Contract-locked payment resolution for Tier 2+ means the node NEVER has the client's money until delivery is confirmed. The smart contract enforces this — no trust required. The bond is additional deterrent on top of an already-secure base. This is Josemi's gas model applied to payments: lock resources, enforce conditions on-chain, resolve deterministically.
 
 ### 9.9 Cross-Contract Composition Risk (eUTXO-Specific)
 
@@ -1539,12 +1539,12 @@ Total investment to reach Tier 4:
 ```
 Step 5: Win selection for a 100 ERG task (legitimate high rep helps here)
 Step 6: Post delivery bond: 50% × 100 = 50 ERG
-Step 7: Payment moves to escrow (Payment Resolution Box) — NOT to attacker
+Step 7: Payment moves to Payment Resolution Contract — NOT to attacker
 
 Attack option A: Don't deliver
   → Client flags after exec deadline
   → Bond forfeited: -50 ERG
-  → Escrowed payment returns to client: attacker gains 0 ERG
+  → Locked payment returns to client: attacker gains 0 ERG
   → Net: -50 ERG - 1 ERG fees - 33+ days = LOSS OF 51 ERG
 
 Attack option B: Deliver garbage (non-deterministic service)
@@ -1557,7 +1557,7 @@ Attack option B: Deliver garbage (non-deterministic service)
     - Net even in BEST case: 99 - 50 bond - 900 future = -851 ERG
 
 Does the 50% delivery bond deter?
-  YES. At 50%, stealing 100 ERG nets at most 49 ERG (if escrow somehow 
+  YES. At 50%, stealing 100 ERG nets at most 49 ERG (if the contract somehow 
   releases, which it won't without delivery confirmation). The bond alone 
   makes the EV negative before counting reputation destruction.
 
@@ -1565,7 +1565,7 @@ Does the 50% delivery bond deter?
   The tier-scaled bond is ESSENTIAL.
 ```
 
-**VERDICT: DEFENSE HOLDS.** The combination of escrow + 50% tier-scaled bond + reputation destruction makes the patient whale attack deeply irrational. The attacker's best move is to keep operating honestly — which is exactly the point.
+**VERDICT: DEFENSE HOLDS.** The combination of contract-locked payment + 50% tier-scaled bond + reputation destruction makes the patient whale attack deeply irrational. The attacker's best move is to keep operating honestly — which is exactly the point.
 
 **KEY FINDING: The delivery bond MUST scale with tier (already implemented in §2 Contract 6).** A flat 5% would break at Tier 4. Our non-linear scaling (5% → 50%) is correct and necessary.
 
@@ -1608,7 +1608,7 @@ Node perspective:
 Attack surface:
   - Attacker would need to win ALL 50 subtasks to capture full value
   - With weighted random selection, near-impossible unless they ARE the best node
-  - Each subtask independently defended by escrow + bond + reputation
+  - Each subtask independently defended by payment contracts + bond + reputation
 ```
 
 **But could a client + node collude on a fake 5,000 ERG task (if we allowed it)?**
@@ -1642,7 +1642,7 @@ With 5 cartel members holding 30% of total qualifying rep:
   P(any cartel member wins) = 30%
   P(specific cartel member wins) = ~6%
 
-Not a guarantee. And even if they win: escrow means they must deliver.
+Not a guarantee. And even if they win: the payment contract means they must deliver.
 ```
 
 **VERDICT: DEFENSE HOLDS.** The 100 ERG cap is the defense. Tasks >100 ERG MUST be split. This is a protocol-level constraint, not a suggestion.
@@ -1723,7 +1723,7 @@ Game theory: a 20-person conspiracy requires:
   - Total capital: 20 × 2,000 = 40,000 ERG committed
 
 Even if they build reputation:
-  - Payment escrow means they must deliver to collect
+  - Payment the payment contract means they must deliver to collect
   - Each "attack" (non-delivery) costs 50% bond at Tier 4
   - One exposed member can burn the entire ring
 
@@ -1758,10 +1758,10 @@ Enhancement to circular detection (Layer 6):
   
   This catches rings up to ~30 members. Beyond that, the ring 
   is so large and well-funded that it's effectively a legitimate 
-  sub-network — and escrow prevents theft anyway.
+  sub-network — and payment contracts prevent theft anyway.
 ```
 
-**VERDICT: DEFENSE HOLDS for rings ≤10 (diversity + cycle detection). ENHANCED for rings 11-30 (eigenvalue analysis). Rings 30+ are theoretically possible but economically irrational (escrow prevents theft, honest earning is more profitable).**
+**VERDICT: DEFENSE HOLDS for rings ≤10 (diversity + cycle detection). ENHANCED for rings 11-30 (eigenvalue analysis). Rings 30+ are theoretically possible but economically irrational (payment contracts prevent theft, honest earning is more profitable).**
 
 ---
 
@@ -1881,7 +1881,7 @@ Phase 2: The exit scam
   Step 5: Claim Task E (100 ERG) — post 50 ERG bond
 
   Total bonds posted: 250 ERG
-  Total escrowed payments: 500 ERG (held in Payment Resolution Boxes)
+  Total contract-locked payments: 500 ERG (held in Payment Resolution Boxes)
 ```
 
 **⚠️ CRITICAL GAP IDENTIFIED: Can a node claim 5 tasks simultaneously?**
@@ -1892,7 +1892,7 @@ in the same claim window or across overlapping windows.
 
 This is a problem because:
   - Bond capital: 5 × 50 ERG = 250 ERG — expensive but possible
-  - If even ONE escrow somehow releases without delivery 
+  - If even ONE payment contract somehow releases without delivery 
     (e.g., non-deterministic service, cross-validation fails):
     attacker nets 99 ERG from that task
   - Reputation damage is the same whether you fail on 1 or 5 tasks
@@ -2038,15 +2038,15 @@ No oracle dependency. Quarterly review cadence.
 
 | Scenario | Attacker Capital | Held? | Key Defense | Fix Required? |
 |----------|-----------------|-------|-------------|---------------|
-| 1. Patient Whale | 10,000 ERG | ✅ YES | Escrow + 50% bond | No — tier-scaled bonds already sufficient |
+| 1. Patient Whale | 10,000 ERG | ✅ YES | Contract-locked payment + 50% bond | No — tier-scaled bonds already sufficient |
 | 2. 5,000 ERG Bounty | 5,000 ERG | ✅ YES | 100 ERG protocol cap | Yes — enforce max in contract |
-| 3. Coordinated Cartel | 10,000 ERG | ✅ YES* | Diversity + escrow | Yes — enhanced ring detection |
+| 3. Coordinated Cartel | 10,000 ERG | ✅ YES* | Diversity + payment contracts | Yes — enhanced ring detection |
 | 4. Price Shock | N/A | ✅ YES | Ratio-based deterrence | Yes — governance response protocol |
-| 5. Long Con (multi-exit) | 10,000 ERG | ✅ YES* | Escrow + concurrent limits | Yes — claim limit + velocity cap |
+| 5. Long Con (multi-exit) | 10,000 ERG | ✅ YES* | Contract-locked payment + concurrent limits | Yes — claim limit + velocity cap |
 
 *\*Held before fixes but with thinner margins. Fixes provide comfortable safety margin.*
 
-**The fundamental insight:** Escrow is the unbreakable foundation. Every whale-scale attack ultimately fails because the attacker never holds the payment until delivery is confirmed. Bonds, reputation, and detection layers are defense-in-depth — but escrow is the wall. You can't steal what you never hold.
+**The fundamental insight:** The contract stack is the unbreakable foundation. Every whale-scale attack ultimately fails because the attacker never holds the payment until delivery is confirmed. Bonds, reputation, and detection layers are defense-in-depth — but reputation-gated smart contracts are the wall. You can't steal what you never hold.
 
 ---
 
