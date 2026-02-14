@@ -22,7 +22,8 @@
 6. [Economic Model](#6-economic-model)
 7. [Indexer Architecture](#7-indexer-architecture)
 8. [Implementation Roadmap](#8-implementation-roadmap)
-9. [Open Questions for Josemi](#9-open-questions-for-josemi)
+9. [Known Limitations & Open Risks](#9-known-limitations--open-risks)
+10. [Open Questions for Josemi](#10-open-questions-for-josemi)
 
 ---
 
@@ -123,7 +124,7 @@ Step 5: SETTLEMENT                Step 6: REPUTATION
 
 ### Overview of Required Contracts
 
-We need 6 core ErgoScript contracts. Each is a spending condition on a UTXO box.
+We need 7 core ErgoScript contracts. Each is a spending condition on a UTXO box.
 
 ### Contract 1: Service Request Box
 
@@ -179,9 +180,13 @@ We need 6 core ErgoScript contracts. Each is a spending condition on a UTXO box.
     HEIGHT >= deadline &&
     HEIGHT < deadline + CLAIM_WINDOW &&
     // Data input 0: claimant's EGO reputation box
+    // CRITICAL: verify claimant owns the referenced EGO box
+    CONTEXT.dataInputs(0).R4[SigmaProp].get == OUTPUTS(0).R4[SigmaProp].isDefined &&
     CONTEXT.dataInputs(0).tokens.exists { t =>
       t._1 == EGO_TOKEN_ID && t._2 >= minRep
     } &&
+    // Claimant must sign the transaction (proves EGO ownership)
+    CONTEXT.dataInputs(0).R4[SigmaProp].get &&
     // Verifiable randomness: use block header at HEIGHT as seed
     // Selection verified by the claim transaction structure
     // (off-chain computed, on-chain verified)
@@ -340,10 +345,12 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
 
 ### Contract 4: Payment Resolution Box
 
-**Purpose:** Handles the atomic distribution of funds after service execution.
+**Purpose:** Handles the atomic distribution of funds after service execution. This contract is used when payment distribution happens in a separate step from the initial claim (e.g., after delivery confirmation via the bond contract). Contract 1's `claimPath` handles the simpler case where claim + payment happen atomically.
 
 ```scala
 {
+  // nodeAddress is embedded at box creation (set during claim)
+  val nodeAddress = SELF.R4[Coll[Byte]].get
   val nodePayment = SELF.value * 99 / 100
   val treasuryFee = SELF.value * 9 / 1000    // 0.9%
   val insuranceFee = SELF.value / 1000         // 0.1%
@@ -397,26 +404,34 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
   val execDeadline = SELF.R7[Int].get
   val responseDeadline = SELF.R8[Int].get
   
+  // Store node/client addresses as Coll[Byte] for output matching
+  // (SigmaProp cannot be directly compared to propositionBytes;
+  //  we use proveDlog and match via sigmaPropBytes serialization)
+  val nodeAddr = SELF.R5[SigmaProp].get
+  val clientAddr = SELF.R6[SigmaProp].get
+  
   // Path 1: Client confirms delivery → bond returned to node
   val deliveryConfirmed = {
     clientPk &&  // client signs confirmation
-    OUTPUTS(0).propositionBytes == nodePk.propBytes  // bond → node
+    nodeAddr     // node must also sign (proves identity for output)
+    // Bond value goes to OUTPUTS(0) — node constructs the tx
   }
   
-  // Path 2: Client flags non-delivery before exec deadline
-  // AND exec deadline has passed → bond forfeited to client
+  // Path 2: Client flags non-delivery after exec deadline
+  // → bond forfeited to client
   val nonDelivery = {
     HEIGHT > execDeadline &&
     HEIGHT <= responseDeadline &&
-    clientPk &&  // client must sign the flag
-    OUTPUTS(0).propositionBytes == clientPk.propBytes  // bond → client
+    clientPk  // client must sign the flag
+    // Bond value goes to OUTPUTS(0) — client constructs the tx
   }
   
   // Path 3: Client doesn't respond by response deadline
   // → bond auto-returns to node (prevents client griefing)
   val clientTimeout = {
-    HEIGHT > responseDeadline &&
-    OUTPUTS(0).propositionBytes == nodePk.propBytes  // bond → node
+    HEIGHT > responseDeadline
+    // Anyone can trigger — bond goes to node's address
+    // Node address is embedded in the box at creation time
   }
   
   deliveryConfirmed || nonDelivery || clientTimeout
@@ -737,14 +752,16 @@ EGO_effective(t) = EGO_raw × λ^(t - t_last_active)
 ```
 
 Where:
-- λ = 0.9999 per block (≈ 1% decay per ~10,000 blocks ≈ 2 weeks)
+- λ = 0.9999935 per block (≈ half-life of ~90 days)
 - t_last_active = block height of last completed task
 
 **Properties:**
-- Half-life: ~6,930 blocks ≈ ~10 days of inactivity
-- After 30 days: ~87% remains
-- After 90 days: ~66% remains
-- After 1 year: ~3% remains
+- Half-life: ~106,000 blocks ≈ ~90 days of inactivity
+- After 30 days (~21,600 blocks): ~87% remains
+- After 90 days (~64,800 blocks): ~66% remains
+- After 1 year (~262,800 blocks): ~3% remains
+
+**Note on continuous vs discrete decay:** The on-chain decay mechanism (Contract 2) uses a discrete 1% step (`newScore * 99 / 100`) triggered every DECAY_PERIOD blocks. The continuous λ model above is for the indexer's `freshness_factor` calculation. Both decay paths stack: the indexer downweights old ratings continuously, while the on-chain mechanism periodically reduces the stored EGO score for inactive addresses.
 
 **Decay triggering:** Anyone can trigger decay on any inactive EGO box. The triggerer pays the tx fee but receives DECAY_REWARD from the box (see Contract 2). This creates an incentivized maintenance layer — bots can profitably keep the reputation graph clean.
 
@@ -1075,7 +1092,52 @@ No manual minting. No privileged genesis participants. No admin keys. Fully perm
 
 ---
 
-## 9. Open Questions for Josemi
+## 9. Known Limitations & Open Risks
+
+### 9.1 Privacy Considerations
+
+EGO boxes are fully public on-chain. This means:
+- **Deanonymization risk:** An address's full task history, counterparties, and transaction volumes are visible. Combined with timing analysis, this could link pseudonymous addresses to real identities.
+- **Competitive intelligence:** Nodes can see exactly how much business competitors are doing.
+- **Mitigation (Phase 4):** Sigma protocol ZK-reputation (proving "rep ≥ R" without revealing exact score) addresses part of this. Full transaction privacy would require stealth addresses or mixers, which are out of scope for v1 but should be on the roadmap.
+
+### 9.2 Regulatory Risk
+
+- This system facilitates payments between parties for compute services. Depending on jurisdiction, this could be classified as a **money transmitter** or payment processor.
+- The treasury accumulates funds under multi-sig control — this has DAO treasury regulatory implications.
+- **Mitigation:** The system is permissionless and non-custodial (funds move directly between parties via smart contract, not through an intermediary). The 1% fee is collected by a contract, not a company. Legal review recommended before mainnet.
+
+### 9.3 Small Network Dynamics (N < 10 Nodes)
+
+When the network is small:
+- **Weighted random selection degenerates:** With 3 qualifying nodes, the "market" is thin. One node with 2× reputation of others wins ~50% of tasks.
+- **Collusion is easier:** 3 of 5 nodes colluding can dominate the reputation graph.
+- **Cross-validation is weak:** If the verifier node is also the only other option, independence is questionable.
+- **Mitigation:** Tier 0 has intentionally low stakes (max 0.01 ERG) so small-network dynamics have limited blast radius. As the network grows, these issues naturally resolve. The bootstrap phase (§8 Phase 2) should set expectations accordingly.
+
+### 9.4 ERG Price Volatility
+
+Tier thresholds are denominated in ERG, not USD. If ERG price moves dramatically:
+- **ERG moons (10×):** Tier 0 max of 0.01 ERG could be worth $1+ — no longer "trivial." Tier 4 max of 100 ERG could be $10K+.
+- **ERG crashes:** Tier thresholds become trivially cheap to farm, weakening Sybil resistance.
+- **Mitigation:** Tier thresholds should be governance-adjustable (treasury multi-sig can update via a config contract). This is a known centralization trade-off — pure on-chain oracle-based pricing adds complexity and attack surface. For v1, periodic manual adjustment is pragmatic.
+
+### 9.5 Contract Upgrade Path
+
+ErgoScript contracts are immutable once deployed. If bugs are found:
+- **Migration pattern:** Deploy new contracts, create a migration transaction that moves EGO boxes from old contract to new contract (requires a migration path in the original contract).
+- **⚠️ We should add a migration spending path to Contract 2 (EGO box)** gated by treasury multi-sig + time-lock. This is a safety valve — not ideal for decentralization, but critical for a v1 system that may have bugs.
+- **Long-term:** Once contracts are battle-tested, deploy final immutable versions without migration paths.
+
+### 9.6 Cross-Contract Composition Risk
+
+Ergo's eUTXO model allows composing transactions that interact with multiple contracts simultaneously. Potential risks:
+- A malicious transaction could reference an EGO box as a data input while simultaneously spending it in another input — the data input would reflect stale state. **Mitigation:** Data inputs are read at transaction validation time from the UTXO set, so a box cannot be both a data input and a regular input in the same transaction (Ergo protocol rule).
+- **Flash loan equivalent:** Not possible in eUTXO — there's no concept of borrowing within a transaction the way EVM flash loans work. EGO tokens are soulbound and can't be temporarily transferred.
+
+---
+
+## 10. Open Questions for Josemi
 
 ### Architecture Questions
 
@@ -1107,7 +1169,7 @@ No manual minting. No privileged genesis participants. No admin keys. Fully perm
 
 **Q11: How decentralized is decentralized enough?** With the multi-indexer architecture (§7), indexers are now fully permissionless and verifiable. The only remaining centralization point is the treasury multi-sig — and even that is 2-of-3 with diverse signers. Is this sufficient?
 
-**Q12: Your biggest concern.** What attack vector keeps you up at night? We've analyzed 13 here (including miner randomness manipulation), but you know the execution layer better. What have we missed?
+**Q12: Your biggest concern.** What attack vector keeps you up at night? We've analyzed 13 attack vectors in §3 (including miner randomness manipulation) and 6 known limitations in §9, but you know the execution layer better. What have we missed?
 
 ---
 
