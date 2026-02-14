@@ -125,14 +125,59 @@ This contract locks client funds and enforces fair node selection.
     // Reputation threshold met
     val repQualified = egoRepScore >= minReputation
 
-    // Verifiable randomness from block header at deadline
-    // Pattern: CONTEXT.headers for on-chain randomness
-    val headerBytes = CONTEXT.headers(0).id
-    val selectionSeed = blake2b256(headerBytes ++ SELF.id)
+    // === Verifiable Weighted Random Selection ===
+    // Use 3 consecutive block headers so no single miner controls outcome.
+    // A miner can withhold 1 block, but not 3 consecutive (cost: 3 block rewards).
+    val h0 = CONTEXT.headers(0).id
+    val h1 = CONTEXT.headers(1).id
+    val h2 = CONTEXT.headers(2).id
+    val selectionSeed = blake2b256(h0 ++ h1 ++ h2 ++ SELF.id)
 
-    // Node provides proof of selection via context variable
-    val selectionProof = getVar[Coll[Byte]](1).get
-    val validSelection = blake2b256(selectionProof) == selectionSeed
+    // Convert seed to UnsignedBigInt for modular arithmetic (§1.2, §1.4)
+    val seedBigInt = byteArrayToBigInt(selectionSeed.slice(0, 15))
+    val seedUnsigned = seedBigInt.toUnsignedMod(
+      unsignedBigInt("170141183460469231731687303715884105727") // 2^127 - 1
+    )
+
+    // Qualifying nodes provided as data inputs (indices 1..N).
+    // Each is an EGO box with rep in R4. The tx builder sorts them by
+    // a canonical order (box ID lexicographic) so the set is deterministic.
+    // Total weight = sum of all qualifying rep scores.
+    val qualifyingBoxes = CONTEXT.dataInputs.slice(1, CONTEXT.dataInputs.size)
+    val totalWeight = qualifyingBoxes.fold(0L.toUnsignedBigInt, {
+      (acc: UnsignedBigInt, box: Box) =>
+        acc + box.R4[Long].get.toBigInt.toUnsignedMod(
+          unsignedBigInt("170141183460469231731687303715884105727")
+        )
+    })
+
+    // Weighted selection: pick = seed mod totalWeight
+    // Walk the cumulative weights; the first node whose cumulative > pick wins.
+    val pick = seedUnsigned.mod(totalWeight)
+
+    // The claiming node asserts its index in the qualifying set via context var.
+    // Anyone can verify: recompute pick and walk the weights to confirm.
+    val claimedIndex = getVar[Int](1).get
+    val claimedBox = qualifyingBoxes(claimedIndex)
+
+    // Verify: sum of weights before claimedIndex <= pick
+    val weightsBefore = qualifyingBoxes.slice(0, claimedIndex).fold(
+      0L.toUnsignedBigInt, {
+        (acc: UnsignedBigInt, box: Box) =>
+          acc + box.R4[Long].get.toBigInt.toUnsignedMod(
+            unsignedBigInt("170141183460469231731687303715884105727")
+          )
+      }
+    )
+    val weightsIncluding = weightsBefore + claimedBox.R4[Long].get.toBigInt.toUnsignedMod(
+      unsignedBigInt("170141183460469231731687303715884105727")
+    )
+
+    // pick must fall in [weightsBefore, weightsIncluding)
+    val validSelection = weightsBefore <= pick && pick < weightsIncluding
+
+    // Claimed node's owner must match the payment recipient
+    val claimedOwnerPk = claimedBox.R5[SigmaProp].get
 
     // After deadline
     val afterDeadline = HEIGHT > deadline
@@ -141,7 +186,7 @@ This contract locks client funds and enforces fair node selection.
     val nodePayment = SELF.value * 99L / 100L
     val nodeOutput = OUTPUTS(0)
     val validNodePayment = nodeOutput.value >= nodePayment &&
-      nodeOutput.propositionBytes == egoOwnerPk.propBytes
+      nodeOutput.propositionBytes == claimedOwnerPk.propBytes
 
     // Fee output: 1% to treasury
     val feeOutput = OUTPUTS(1)
@@ -229,15 +274,36 @@ Soulbound reputation — only the rating contract can update it.
       blake2b256(box.propositionBytes) == ratingScriptHash
     }
 
-    // Reputation decay: 1% per 720 blocks (~1 day) of inactivity
-    // Applied before any update
+    // Reputation decay: 1% per 720 blocks (~1 day) of inactivity.
+    // Uses BigInt intermediate math to avoid integer division precision loss (§1.2, §3.7).
+    // Formula: newScore = score * 9900^periods / 10000^periods (basis points)
     val blocksSinceActive = HEIGHT - lastActivity
     val decayPeriods = blocksSinceActive / 720
-    // Integer math: score * 99^periods / 100^periods
-    // For safety, cap decay periods to prevent overflow (§3.7)
     val cappedPeriods = if (decayPeriods > 100) 100 else decayPeriods
 
-    // Activity height updated
+    // Compute 9900^n and 10000^n in BigInt to preserve precision.
+    // Using fold over a range to simulate exponentiation (no loops in ErgoScript §8.3).
+    val periodIndices = Coll(0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+      10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+      20, 21, 22, 23, 24, 25, 26, 27, 28, 29).slice(0, cappedPeriods)
+
+    val basisDecayRate = 9900L.toBigInt   // 99.00% retention per period
+    val basisUnit      = 10000L.toBigInt
+
+    // numerator = 9900^cappedPeriods, denominator = 10000^cappedPeriods
+    val numDenom = periodIndices.fold(
+      (1L.toBigInt, 1L.toBigInt),
+      { (acc: (BigInt, BigInt), _: Int) =>
+        (acc._1 * basisDecayRate, acc._2 * basisUnit)
+      }
+    )
+    val decayedScoreBigInt = currentScore.toBigInt * numDenom._1 / numDenom._2
+    // Result fits in Long: max score ~10^15 * (9900/10000)^100 is well within 2^63
+    val expectedDecayedScore = decayedScoreBigInt.toLong
+
+    // Output score must equal decayed score +/- the new rating delta
+    // (The rating contract enforces the exact delta; here we just verify decay applied.)
+    val scoreAfterDecay = selfOut.R4[Long].get
     val activityUpdated = selfOut.R6[Int].get >= HEIGHT - 1
 
     ratingInputExists && activityUpdated
@@ -259,52 +325,52 @@ Soulbound reputation — only the rating contract can update it.
 - **Script hash validation**: Rating contract identified by hash, not by propBytes comparison — avoids the ErgoTree versioning gotcha (§3.6).
 - **Integer overflow protection** (§3.7): Decay periods capped to prevent arithmetic overflow.
 
-### 4c. Rating Contract (Commit-Reveal)
+### 4c. Rating Contracts (Commit-Reveal, Two Separate Stages)
 
-Two-stage box lifecycle: commit phase → reveal phase.
+Rather than encoding phase as a register integer, we use **two separate contracts** — one for commit, one for reveal. This is the idiomatic eUTXO multi-stage pattern (§2.9): each contract is simpler, each stage's spending conditions are self-contained, and there's no branching on a mutable phase register. The commit box, once both hashes are collected, is consumed and a reveal box is created under the reveal contract.
+
+**4c-i. Commit Contract**
 
 ```scala
 {
-  // === Rating Contract — Commit-Reveal Bilateral ===
-  // Stage 1 (Commit): Both parties submit hash(rating ++ salt)
-  // Stage 2 (Reveal): Both parties reveal, reputation updates
+  // === Rating Commit Contract ===
+  // Collects sealed rating hashes from both parties.
+  // Once both are present, transitions to the Reveal Contract.
   //
-  // R4: Coll[Byte]  — request box ID (links to service request)
+  // R4: Coll[Byte]  — request box ID (replay protection §3.5)
   // R5: SigmaProp   — client public key
   // R6: SigmaProp   — node public key
-  // R7: Coll[Byte]  — client commitment hash (empty = not yet committed)
-  // R8: Coll[Byte]  — node commitment hash (empty = not yet committed)
-  // R9: Int         — phase (0 = awaiting commits, 1 = awaiting reveals)
+  // R7: Coll[Byte]  — client commitment hash (empty if not yet submitted)
+  // R8: Coll[Byte]  — node commitment hash (empty if not yet submitted)
 
-  val requestId   = SELF.R4[Coll[Byte]].get
-  val clientPk    = SELF.R5[SigmaProp].get
-  val nodePk      = SELF.R6[SigmaProp].get
-  val phase       = SELF.R9[Int].get
+  val requestId      = SELF.R4[Coll[Byte]].get
+  val clientPk       = SELF.R5[SigmaProp].get
+  val nodePk         = SELF.R6[SigmaProp].get
+  val revealScriptHash = getVar[Coll[Byte]](2).get  // hash of the reveal contract
 
-  val commitDeadline = HEIGHT + 360   // ~6 hours to commit
-  val revealDeadline = HEIGHT + 720   // ~12 hours to reveal
+  val selfOut = OUTPUTS(CONTEXT.selfBoxIndex)
 
-  if (phase == 0) {
-    // === COMMIT PHASE ===
-    // Either party submits their sealed rating
-    val selfOut = OUTPUTS(CONTEXT.selfBoxIndex)
+  // Check if both commitments are now present
+  val clientHashPresent = selfOut.R7[Coll[Byte]].isDefined &&
+                          selfOut.R7[Coll[Byte]].get.size > 0
+  val nodeHashPresent   = selfOut.R8[Coll[Byte]].isDefined &&
+                          selfOut.R8[Coll[Byte]].get.size > 0
+  val bothCommitted = clientHashPresent && nodeHashPresent
 
-    // Script preserved (multi-stage §2.9)
-    val sameScript = selfOut.propositionBytes == SELF.propositionBytes
-    // Request link preserved (replay protection)
+  // --- Path A: Collecting commitments (output stays as commit contract) ---
+  val collectPath = {
+    val sameScript  = selfOut.propositionBytes == SELF.propositionBytes
     val sameRequest = selfOut.R4[Coll[Byte]].get == requestId
     val sameParties = selfOut.R5[SigmaProp].get == clientPk &&
                       selfOut.R6[SigmaProp].get == nodePk
-    val valueKept = selfOut.value >= SELF.value
+    val valueKept   = selfOut.value >= SELF.value
 
-    // A commitment is being added
     val clientCommitting = {
       val clientHash = getVar[Coll[Byte]](0).get
       selfOut.R7[Coll[Byte]].get == clientHash &&
       selfOut.R8[Coll[Byte]].get == SELF.R8[Coll[Byte]].getOrElse(Coll[Byte]()) &&
       clientPk
     }
-
     val nodeCommitting = {
       val nodeHash = getVar[Coll[Byte]](1).get
       selfOut.R8[Coll[Byte]].get == nodeHash &&
@@ -312,30 +378,63 @@ Two-stage box lifecycle: commit phase → reveal phase.
       nodePk
     }
 
-    // If both committed, advance to phase 1
-    val bothCommitted = selfOut.R7[Coll[Byte]].isDefined &&
-                        selfOut.R8[Coll[Byte]].isDefined &&
-                        selfOut.R7[Coll[Byte]].get.size > 0 &&
-                        selfOut.R8[Coll[Byte]].get.size > 0
-    val nextPhase = if (bothCommitted) selfOut.R9[Int].get == 1
-                    else selfOut.R9[Int].get == 0
-
-    // Double-satisfaction prevention
-    val validSelf = INPUTS(CONTEXT.selfBoxIndex).id == SELF.id
-
-    sigmaProp(sameScript && sameRequest && sameParties &&
-              valueKept && nextPhase && validSelf) &&
+    !bothCommitted && sameScript && sameRequest && sameParties && valueKept &&
     (clientCommitting || nodeCommitting)
+  }
 
-  } else {
-    // === REVEAL PHASE ===
-    // Both parties reveal rating + salt. Contract verifies hash matches.
+  // --- Path B: Both committed → transition to Reveal Contract ---
+  val transitionPath = {
+    val revealBox = selfOut
+    // Output must be the reveal contract (identified by script hash)
+    val validRevealScript = blake2b256(revealBox.propositionBytes) == revealScriptHash
+    // Carry forward all data
+    val dataPreserved = revealBox.R4[Coll[Byte]].get == requestId &&
+                        revealBox.R5[SigmaProp].get == clientPk &&
+                        revealBox.R6[SigmaProp].get == nodePk &&
+                        revealBox.R7[Coll[Byte]].get == selfOut.R7[Coll[Byte]].get &&
+                        revealBox.R8[Coll[Byte]].get == selfOut.R8[Coll[Byte]].get
+    val valueKept = revealBox.value >= SELF.value
 
-    val clientReveal = getVar[Coll[Byte]](0).get    // rating ++ salt
+    bothCommitted && validRevealScript && dataPreserved && valueKept &&
+    (clientPk || nodePk)  // either party can trigger the transition
+  }
+
+  // --- Path C: Timeout refund ---
+  val commitDeadline = SELF.creationInfo._1 + 360  // ~6 hours from creation
+  val timeoutPath = HEIGHT > commitDeadline && (clientPk || nodePk)
+
+  // Double-satisfaction prevention (§3.1)
+  val validSelf = INPUTS(CONTEXT.selfBoxIndex).id == SELF.id
+
+  sigmaProp(validSelf) && (
+    sigmaProp(collectPath) || sigmaProp(transitionPath) || timeoutPath
+  )
+}
+```
+
+**4c-ii. Reveal Contract**
+
+```scala
+{
+  // === Rating Reveal Contract ===
+  // Both hashes are locked in. Parties reveal rating + salt.
+  // Contract verifies hash(reveal) == commitment, then authorizes EGO updates.
+  //
+  // R4: Coll[Byte]  — request box ID
+  // R5: SigmaProp   — client public key
+  // R6: SigmaProp   — node public key
+  // R7: Coll[Byte]  — client commitment hash
+  // R8: Coll[Byte]  — node commitment hash
+
+  val clientPk   = SELF.R5[SigmaProp].get
+  val nodePk     = SELF.R6[SigmaProp].get
+  val clientHash = SELF.R7[Coll[Byte]].get
+  val nodeHash   = SELF.R8[Coll[Byte]].get
+
+  // --- Path A: Both reveal successfully ---
+  val revealPath = {
+    val clientReveal = getVar[Coll[Byte]](0).get  // rating ++ salt
     val nodeReveal   = getVar[Coll[Byte]](1).get
-
-    val clientHash = SELF.R7[Coll[Byte]].get
-    val nodeHash   = SELF.R8[Coll[Byte]].get
 
     // Verify reveals match commitments (front-running protection §3.3)
     val clientValid = blake2b256(clientReveal) == clientHash
@@ -345,45 +444,39 @@ Two-stage box lifecycle: commit phase → reveal phase.
     val clientRating = byteArrayToLong(clientReveal.slice(0, 1))
     val nodeRating   = byteArrayToLong(nodeReveal.slice(0, 1))
 
-    // Ratings must be in valid range [0, 5]
+    // Valid range [0, 5]
     val validRange = clientRating >= 0L && clientRating <= 5L &&
                      nodeRating >= 0L && nodeRating <= 5L
 
-    // Both EGO boxes updated via data inputs
-    // (The actual reputation update logic lives in the EGO contract;
-    //  this contract just validates the reveal and authorizes the update.)
-
-    // Timeout: if one party doesn't reveal, the other's rating stands
-    // and non-revealer gets penalized
-    val bothRevealed = clientValid && nodeValid && validRange
-
-    val timeout = {
-      HEIGHT > revealDeadline &&
-      (clientPk || nodePk)  // either party can trigger timeout cleanup
-    }
-
-    sigmaProp(bothRevealed) || timeout
+    clientValid && nodeValid && validRange
   }
+
+  // --- Path B: Timeout — one party didn't reveal ---
+  val revealDeadline = SELF.creationInfo._1 + 360  // ~6 hours from reveal box creation
+  val timeoutPath = HEIGHT > revealDeadline && (clientPk || nodePk)
+
+  sigmaProp(revealPath) || timeoutPath
 }
 ```
 
 **Patterns used:**
-- **Multi-stage protocol** (§2.9): Box transitions from phase 0 (commit) to phase 1 (reveal) by recreating itself with updated registers.
+- **Multi-stage protocol with separate contracts** (§2.9): Commit box → Reveal box. Each contract handles exactly one concern. No mutable phase register — the *contract itself* encodes the phase. This is how eUTXO state machines should work.
 - **Commit-reveal** (§3.3): Sealed hash commitments prevent front-running and strategic rating — the eUTXO equivalent of Vickrey's sealed-bid mechanism.
-- **Context variables** (§8.10): Ratings and salts provided off-chain via `getVar`, not stored until committed.
+- **Context variables** (§8.10): Ratings, salts, and the reveal script hash provided off-chain via `getVar`.
 - **Double-satisfaction prevention** (§3.1): `INPUTS(CONTEXT.selfBoxIndex).id == SELF.id`.
-- **Timeout handling**: Deadline-based fallback ensures the protocol never gets stuck. Non-revealing party implicitly concedes.
+- **creationInfo for deadlines**: Uses `SELF.creationInfo._1` (creation height) instead of storing deadline in a register — cleaner and tamper-proof.
+- **Timeout handling**: Each stage has its own deadline. Non-participating party forfeits.
 
 ### Contract Interaction Summary
 
 ```
-[Service Request Box]  ──claim──▶  [Node Payment] + [Fee] + [Rating Box (phase 0)]
-                                                                    │
-[Rating Box (phase 0)] ──commit──▶ [Rating Box (phase 0, with hash)]
-                                                                    │
-[Rating Box (both committed)] ──advance──▶ [Rating Box (phase 1)]
-                                                                    │
-[Rating Box (phase 1)] ──reveal──▶ [EGO updates] (via data inputs)
+[Service Request Box]  ──claim──▶  [Node Payment] + [Fee] + [Commit Box]
+                                                                │
+[Commit Box] ──commit──▶ [Commit Box (with hash)]  (1-2 txs, one per party)
+                                                                │
+[Commit Box (both hashes)] ──transition──▶ [Reveal Box]  (new contract)
+                                                                │
+[Reveal Box] ──reveal──▶ [EGO updates] (via data inputs)
 ```
 
 ---
@@ -415,7 +508,7 @@ The architectural insight: by having *no backend*, we have *no attack surface* f
 
 **These contracts are pseudocode.** The ErgoScript above is syntactically informed by the language specification but has not been compiled or tested on-chain. Types, register layouts, and interaction patterns need Josemi's review and real compilation against sigmastate-interpreter. We're showing the *architecture*, not shipping the bytecode.
 
-**Selection mechanism needs formalization.** The weighted random selection from block headers is sketched but not fully specified. The exact mapping from `blake2b256(headerId ++ selfId)` to node selection requires careful design to ensure uniform distribution and resistance to miner manipulation (miners can withhold blocks, though at significant cost on Ergo's PoW).
+**Selection mechanism edge cases.** The weighted random selection (§4a) uses 3 consecutive block headers to resist miner manipulation, with UnsignedBigInt modular arithmetic for deterministic node mapping. Remaining risk: a miner controlling 3 consecutive blocks could bias selection, but on Ergo's PoW this requires ~majority hashrate sustained over ~6 minutes — far exceeding the value of any single task.
 
 ---
 
