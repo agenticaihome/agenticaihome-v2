@@ -55,8 +55,7 @@ Client Browser → SvelteKit (static) → Ergo Explorer API → Ergo Blockchain
 ## Links
 - **V2 Repo:** github.com/agenticaihome/agenticaihome-v2
 - **V1 (Live):** agenticaihome.com
-- **Game Theory:** github.com/agenticaihome/agenticaihome-v2/blob/main/docs/GAME_THEORY.md
-- **Verification Design:** github.com/agenticaihome/agenticaihome-v2/blob/main/docs/VERIFICATION_SUMMARY.md
+- **Technical Design:** github.com/agenticaihome/agenticaihome-v2/blob/main/docs/TECHNICAL_DESIGN.md
 - **Ergo Platform:** ergoplatform.org
 
 ---
