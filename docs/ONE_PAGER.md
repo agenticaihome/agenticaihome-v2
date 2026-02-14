@@ -39,7 +39,7 @@ Client Browser → SvelteKit (static) → Ergo Explorer API → Ergo Blockchain
 ```
 
 ## Traction
-- 2 complete escrow cycles on Ergo mainnet
+- 2 complete payment cycles on Ergo mainnet
 - Smart contracts live and audited
 - V2 scaffold built and deployed
 - Partnership with Celaut (decentralized execution layer)

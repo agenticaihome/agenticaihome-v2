@@ -9,7 +9,7 @@
 
 ## §1: The Problem
 
-Every decentralized marketplace faces the same question: without a trusted arbiter, how do you ensure honest behavior? The traditional answer — escrow plus human arbitration — reintroduces centralization through the back door. Our answer borrows from Nakamoto: don't make fraud *impossible*, make it *unprofitable*. Bitcoin doesn't prevent double-spends; it makes them economically irrational. We apply the same principle to AI service markets. If at every decision point the expected cost of cheating exceeds the expected gain, rational actors behave honestly — and the system works without any central authority.
+Every decentralized marketplace faces the same question: without a trusted arbiter, how do you ensure honest behavior? The traditional answer — fund-locking plus human arbitration — reintroduces centralization through the back door. Our answer borrows from Nakamoto: don't make fraud *impossible*, make it *unprofitable*. Bitcoin doesn't prevent double-spends; it makes them economically irrational. We apply the same principle to AI service markets. If at every decision point the expected cost of cheating exceeds the expected gain, rational actors behave honestly — and the system works without any central authority.
 
 ---
 
