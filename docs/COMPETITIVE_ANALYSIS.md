@@ -102,7 +102,7 @@ That's our opening.
 - **VC-funded** — centralized funding, potential for extractive tokenomics
 - **Custom blockchain** — fragmented from existing ecosystems
 
-**Where we win:** We're on Ergo (fair launch, no VC, proven PoW). We already have mainnet escrow transactions. 0G is still building.
+**Where we win:** We're on Ergo (fair launch, no VC, proven PoW). We already have mainnet payment transactions. 0G is still building.
 
 ---
 
