@@ -23,7 +23,8 @@
 7. [Indexer Architecture](#7-indexer-architecture)
 8. [Implementation Roadmap](#8-implementation-roadmap)
 9. [Known Limitations & Open Risks](#9-known-limitations--open-risks)
-10. [Open Questions for Josemi](#10-open-questions-for-josemi)
+10. [Whale-Scale Attack Analysis](#10-whale-scale-attack-analysis--stress-testing-at-10000-erg)
+11. [Open Questions for Josemi](#11-open-questions-for-josemi)
 
 ---
 
@@ -232,6 +233,9 @@ The "highest rep wins" model creates a monopoly where top nodes capture all work
 | MIN_ERG | 0.001 ERG | Minimum task value — below this, tx fees dominate |
 | RESPONSE_WIN (R) | 720 blocks (~24h) | Client response window for delivery bond |
 | EXEC_WINDOW (E) | 720 blocks (~24h) | Default execution deadline (overridable per task) |
+| MAX_CONCURRENT | 2-3 (tier-dependent) | Max active claims per node (§10.5) |
+| EPOCH_VALUE_CAP | 1-200 ERG (tier-dependent) | Max ERG claimable per 720-block epoch (§10.5) |
+| MAX_TASK_VALUE | 100 ERG | Protocol-enforced ceiling; larger jobs must split (§10.2) |
 
 **Tiebreaker for equal reputation:** When two or more nodes have exactly equal reputation in weighted random selection, the randomness seed deterministically resolves selection — equal-weight nodes get equal probability (no separate tiebreaker needed since the hash maps into a continuous range).
 
@@ -855,6 +859,7 @@ For non-deterministic services:
 | 4. Outlier-Dampened | Extreme raters (all 5s or all 1s) downweighted | Manipulation bots |
 | 5. Diversity-Scored | Diverse counterparties = higher effective rep | Collusion clusters |
 | 6. Circular-Detected | A→B→C→A rating cycles = progressive dampening | Coordinated rings |
+| 7. Topology-Scored | Local clustering coefficient vs network avg; eigenvalue analysis | Large coordinated rings (10-30 members) |
 
 ---
 
@@ -1478,7 +1483,574 @@ Ergo's eUTXO model allows composing transactions that interact with multiple con
 
 ---
 
-## 10. Open Questions for Josemi
+## 10. Whale-Scale Attack Analysis — Stress Testing at 10,000+ ERG
+
+> *Previous simulations (§9.7) used 100-10,000 ERG attackers but assumed rational single-task theft. This section asks: what if the attacker is patient, well-funded, and creative? We simulate 5 whale-scale scenarios with exact ERG accounting and identify two mechanism gaps that required fixes.*
+
+### 10.1 Scenario 1: The Patient Whale (10,000 ERG, 6 months)
+
+**Attacker profile:** 10,000 ERG capital, 6 months of patience. Goal: build massive legitimate reputation, then exploit ONE high-value task.
+
+**Step-by-step walkthrough:**
+
+```
+Phase 1: Tier 0 → Tier 1 (Days 1-2)
+  Tasks: 10 × 0.01 ERG = 0.1 ERG cumulative
+  Fees paid: 1% × 0.1 = 0.001 ERG
+  Time: 500 blocks (~17h) minimum
+  Bond costs: 5% × 0.01 × 10 = 0.005 ERG (all returned on delivery)
+  Net cost: 0.001 ERG in fees (tasks are real — payment flows back)
+
+Phase 2: Tier 1 → Tier 2 (Days 2-5)
+  Tasks: 9 × 0.1 ERG = 0.9 ERG additional (total 1 ERG cumulative)
+  Fees paid: 1% × 0.9 = 0.009 ERG
+  Time: 2000 blocks (~3 days) minimum
+  Bond costs: 10% × 0.1 × 9 = 0.09 ERG (all returned)
+  Net cost: 0.009 ERG additional fees
+
+Phase 3: Tier 2 → Tier 3 (Days 5-12)
+  Tasks: 9 × 1 ERG = 9 ERG additional (total 10 ERG cumulative)
+  Fees paid: 1% × 9 = 0.09 ERG
+  Time: 5000 blocks (~7 days) minimum
+  Bond costs: 15% × 1 × 9 = 1.35 ERG (all returned)
+  Net cost: 0.09 ERG additional fees
+
+Phase 4: Tier 3 → Tier 4 (Days 12-33)
+  Tasks: 9 × 10 ERG = 90 ERG additional (total 100 ERG cumulative)
+  Fees paid: 1% × 90 = 0.9 ERG
+  Time: 15000 blocks (~21 days) minimum
+  Bond costs: 25% × 10 × 9 = 22.5 ERG (all returned)
+  Net cost: 0.9 ERG additional fees
+
+Total investment to reach Tier 4:
+  Fees: 0.001 + 0.009 + 0.09 + 0.9 = 1.0 ERG
+  Time: ~33 days minimum (but attacker has 6 months)
+  Compute: real work performed to earn legitimate ratings
+  Capital tied up in bonds at peak: 22.5 ERG (returned)
+  
+  NOTE: If attacker is ALSO the client for self-dealing, 
+  they pay themselves — net ERG movement is just the 1% fee leak.
+  But diversity scoring crushes self-dealing reputation (see §9.7 Sim 4).
+  So the attacker must do REAL work for REAL clients to build genuine rep.
+```
+
+**The attack moment — claiming a 100 ERG Tier 4 task:**
+
+```
+Step 5: Win selection for a 100 ERG task (legitimate high rep helps here)
+Step 6: Post delivery bond: 50% × 100 = 50 ERG
+Step 7: Payment moves to escrow (Payment Resolution Box) — NOT to attacker
+
+Attack option A: Don't deliver
+  → Client flags after exec deadline
+  → Bond forfeited: -50 ERG
+  → Escrowed payment returns to client: attacker gains 0 ERG
+  → Net: -50 ERG - 1 ERG fees - 33+ days = LOSS OF 51 ERG
+
+Attack option B: Deliver garbage (non-deterministic service)
+  → Client rates negative, cross-validation triggered
+  → If fraud detected: -50 ERG bond, payment returned, reputation destroyed
+  → If fraud somehow not detected: +99 ERG payment, but:
+    - Reputation damaged by negative rating
+    - Future earning capacity destroyed (was earning ~5 ERG/day at Tier 4)
+    - Expected future earnings over 6 months: ~900 ERG
+    - Net even in BEST case: 99 - 50 bond - 900 future = -851 ERG
+
+Does the 50% delivery bond deter?
+  YES. At 50%, stealing 100 ERG nets at most 49 ERG (if escrow somehow 
+  releases, which it won't without delivery confirmation). The bond alone 
+  makes the EV negative before counting reputation destruction.
+
+  Compare: a flat 5% bond would mean losing only 5 ERG to steal 94 ERG.
+  The tier-scaled bond is ESSENTIAL.
+```
+
+**VERDICT: DEFENSE HOLDS.** The combination of escrow + 50% tier-scaled bond + reputation destruction makes the patient whale attack deeply irrational. The attacker's best move is to keep operating honestly — which is exactly the point.
+
+**KEY FINDING: The delivery bond MUST scale with tier (already implemented in §2 Contract 6).** A flat 5% would break at Tier 4. Our non-linear scaling (5% → 50%) is correct and necessary.
+
+---
+
+### 10.2 Scenario 2: The 5,000 ERG Bounty
+
+**The problem:** Someone posts a 5,000 ERG task. At $50/ERG, that's $250,000. Worth attacking.
+
+**First question: does the tier system even allow this?**
+
+```
+Current tier caps:
+  Tier 0: 0.01 ERG
+  Tier 1: 0.1 ERG
+  Tier 2: 1 ERG
+  Tier 3: 10 ERG
+  Tier 4: 100 ERG  ← MAXIMUM
+
+Answer: NO. The protocol does not support 5,000 ERG tasks.
+This is BY DESIGN (see §9.8).
+```
+
+**But what if someone NEEDS a 5,000 ERG task done?**
+
+The correct approach is **task splitting**: 50 × 100 ERG subtasks with progress payments. This is safer for everyone:
+
+```
+Client perspective:
+  - Risk per subtask: 100 ERG (covered by Tier 4 defenses)
+  - Can stop paying if quality degrades
+  - Multiple nodes can work in parallel
+  - Progress visibility at each checkpoint
+
+Node perspective:
+  - Bond per subtask: 50 ERG (not 2,500 ERG for a hypothetical 50% of 5,000)
+  - Gets paid incrementally — not waiting for one massive payout
+  - Lower risk of client dispute on partial work
+
+Attack surface:
+  - Attacker would need to win ALL 50 subtasks to capture full value
+  - With weighted random selection, near-impossible unless they ARE the best node
+  - Each subtask independently defended by escrow + bond + reputation
+```
+
+**But could a client + node collude on a fake 5,000 ERG task (if we allowed it)?**
+
+```
+Attack: Client creates fake 5,000 ERG task. Colluding node wins and "delivers."
+Goal: Extract... what exactly?
+
+Wait — the money flows CLIENT → NODE. The client is PAYING the node.
+If they're colluding, the client is paying their own accomplice.
+The only "extraction" is from the platform fee: 1% × 5,000 = 50 ERG to treasury.
+
+This isn't an attack — it's money laundering. The 1% fee makes it an 
+expensive way to transfer money to yourself. And the reputation gained 
+is dampened by repeat-dampening and diversity scoring.
+
+Actual concern: they build reputation cheaply via self-dealing.
+Defense: Same as §3.2 — diversity scoring crushes mutual-only reputation.
+```
+
+**Could a group collude to guarantee one of them wins selection?**
+
+```
+Weighted random selection: P(node_i) = rep_i / Σrep_j
+
+To guarantee a win, the cartel needs either:
+  A) 100% of qualifying reputation (impossible with any honest nodes)
+  B) Manipulation of the randomness seed (requires mining consecutive blocks — §3.13)
+
+With 5 cartel members holding 30% of total qualifying rep:
+  P(any cartel member wins) = 30%
+  P(specific cartel member wins) = ~6%
+
+Not a guarantee. And even if they win: escrow means they must deliver.
+```
+
+**VERDICT: DEFENSE HOLDS.** The 100 ERG cap is the defense. Tasks >100 ERG MUST be split. This is a protocol-level constraint, not a suggestion.
+
+**⚠️ NEW FIX REQUIRED:** The Service Request contract (Contract 1) should enforce a hard maximum task value corresponding to the highest active tier. Currently the contract checks payment distribution but doesn't enforce `payment <= MAX_TIER_VALUE`. Adding this enforcement. *(See §10.6 for implementation.)*
+
+---
+
+### 10.3 Scenario 3: Coordinated Cartel (5 × 2,000 ERG)
+
+**Attacker profile:** 5 well-funded actors, each with 2,000 ERG. Total: 10,000 ERG. They attempt the **rotation workaround** to dodge repeat-dampening.
+
+**The rotation strategy:**
+
+```
+Members: A, B, C, D, E
+
+Round 1: A→B (A is client, B is node)
+Round 2: B→C
+Round 3: C→D
+Round 4: D→E
+Round 5: E→A
+
+Each pair interacts exactly ONCE per cycle.
+Repeat-dampening weight = 1/1 = 1.0 (no dampening!)
+
+After 10 cycles (50 tasks):
+  Each member has been client 10 times, node 10 times.
+  Each pair has interacted exactly 10 times.
+  Repeat-dampening weight on cycle 10: 1/10 = 0.1 ← catches up eventually
+
+But in cycle 1: each pair weight is 1/1, no dampening.
+```
+
+**Does diversity scoring catch a 5-member ring?**
+
+```
+Each member has 4 unique counterparties (the other 4 ring members).
+If they ONLY interact within the ring:
+  diversity_factor = 4 / total_ratings
+
+After 50 tasks (10 cycles):
+  Each member has 50 total ratings, 4 unique raters.
+  diversity_factor = 4 / 50 = 0.08
+  effective_rep = raw_rep × 0.08^0.5 = raw_rep × 0.28
+  → 72% reputation reduction
+
+But what if they ALSO do legitimate tasks?
+  Member A does 50 ring tasks + 50 legitimate tasks (diverse clients).
+  unique_raters = 4 ring + ~40 legitimate = 44
+  total_ratings = 100
+  diversity_factor = 44 / 100 = 0.44
+  effective_rep = raw × 0.44^0.5 = raw × 0.66
+  → Only 34% reduction — the legitimate work masks the ring!
+```
+
+**At what ring size does detection fail?**
+
+```
+Ring of 5:  4 unique counterparties — low diversity, detectable
+Ring of 10: 9 unique counterparties — moderate diversity
+Ring of 20: 19 unique counterparties — starts looking legitimate
+Ring of 50: 49 unique counterparties — virtually indistinguishable 
+            from honest participation
+
+Critical threshold: when ring_size > √(typical_honest_counterparties)
+For an honest node with ~50 unique counterparties over 6 months:
+  Ring of 20+ members can mimic honest diversity patterns.
+```
+
+**But 20-member rings have coordination problems:**
+
+```
+Game theory: a 20-person conspiracy requires:
+  - Trust among 20 pseudonymous actors
+  - Coordinated timing across 20 wallets
+  - No defectors (any member can blackmail or expose others)
+  - Total capital: 20 × 2,000 = 40,000 ERG committed
+
+Even if they build reputation:
+  - Payment escrow means they must deliver to collect
+  - Each "attack" (non-delivery) costs 50% bond at Tier 4
+  - One exposed member can burn the entire ring
+
+The Nash equilibrium for any ring member:
+  "I have Tier 4 reputation. I can earn 5 ERG/day honestly.
+   Why would I coordinate with 19 others to steal, when I 
+   can just... keep earning legitimately?"
+```
+
+**⚠️ PARTIAL GAP IDENTIFIED: Graph cycle detection.**
+
+The existing circular detection (Layer 6 in §4.8) uses "progressive dampening" but doesn't specify the algorithm. For rings ≥10 members, simple pairwise analysis misses the pattern. 
+
+**NEW FIX: Ring topology detection via eigenvalue analysis.**
+
+```
+Enhancement to circular detection (Layer 6):
+  
+  1. Build the rating graph G where edge(A,B) = number of interactions
+  2. Compute adjacency matrix eigenvalues
+  3. Dense subgraphs (cliques/rings) produce characteristic eigenvalue 
+     patterns — specifically, a k-member ring has eigenvalue k-1 
+     with multiplicity related to ring membership
+  4. Flag addresses whose local subgraph has suspiciously high 
+     clustering coefficient relative to the network average
+  
+  Detection threshold:
+    clustering_coefficient(node) > 2 × network_avg → FLAG
+    
+  For a 5-member ring: clustering ≈ 0.6 (every neighbor connected)
+  For honest node: clustering ≈ 0.1-0.2 (sparse diverse connections)
+  
+  This catches rings up to ~30 members. Beyond that, the ring 
+  is so large and well-funded that it's effectively a legitimate 
+  sub-network — and escrow prevents theft anyway.
+```
+
+**VERDICT: DEFENSE HOLDS for rings ≤10 (diversity + cycle detection). ENHANCED for rings 11-30 (eigenvalue analysis). Rings 30+ are theoretically possible but economically irrational (escrow prevents theft, honest earning is more profitable).**
+
+---
+
+### 10.4 Scenario 4: ERG Price Shock (50× appreciation)
+
+**Setup:** ERG goes from $0.30 to $15.00 (50×). Historical precedent: ERG hit ~$18 in 2021 from <$0.50.
+
+**Impact on tier thresholds:**
+
+```
+                    At $0.30/ERG      At $15/ERG
+Tier 0 (0.01 ERG): $0.003            $0.15         Still trivial ✓
+Tier 1 (0.1 ERG):  $0.03             $1.50         Getting real
+Tier 2 (1 ERG):    $0.30             $15           Meaningful
+Tier 3 (10 ERG):   $3.00             $150          Serious
+Tier 4 (100 ERG):  $30.00            $1,500        Major transaction
+```
+
+**Problem 1: Delivery bonds become expensive for honest nodes.**
+
+```
+Tier 4 bond = 50% × 100 ERG = 50 ERG = $750 at $15/ERG
+
+For a node operator running on modest hardware:
+  Monthly revenue target: maybe $500-1000
+  Tying up $750 in a single bond is a significant capital requirement.
+  
+  At $0.30/ERG: same bond = $15 — trivial.
+  
+  This creates a wealth barrier: only well-capitalized nodes can 
+  participate in Tier 4 at high ERG prices.
+```
+
+**Problem 2: Tier thresholds may not match market reality.**
+
+```
+At $15/ERG:
+  - Tier 2 max (1 ERG = $15) might be too low for useful AI tasks
+  - Tier 4 max (100 ERG = $1,500) might be too high for most users
+  - The tier structure designed at $0.30 doesn't map to $15 economics
+```
+
+**Should we use oracle-fed USD thresholds?**
+
+```
+Pros:
+  - Stable UX regardless of ERG price
+  - Bonds always proportional to real-world value
+  
+Cons:
+  - Oracle dependency = centralization + attack surface
+  - Oracle manipulation could game tier access
+  - Adds complexity to contracts (external data feed)
+  - Ergo oracle ecosystem is still maturing
+  
+DECISION: NO oracles for v1. Here's why:
+
+1. Governance adjustment is sufficient. Treasury multi-sig can update 
+   tier thresholds via a config contract when ERG price moves 
+   significantly (e.g., >3× in either direction). This is a 
+   quarterly governance decision, not a real-time feed.
+
+2. The RATIOS matter more than the absolutes. The 50% bond at 
+   Tier 4 is a deterrent because it's 50% of the task value — 
+   regardless of USD price. The game theory holds at any ERG price.
+
+3. Oracle attacks are worse than price volatility. A manipulated 
+   oracle could temporarily reduce all bonds to near-zero or 
+   inflate tier access — far more dangerous than stale thresholds.
+```
+
+**But we DO need a response plan:**
+
+```
+Trigger: ERG price moves >3× from the price at last threshold update.
+
+Response (governance):
+  1. Treasury multi-sig proposes new tier thresholds
+  2. Time-locked announcement (1000 blocks ≈ 3.5 days)
+  3. New config contract deployed
+  4. In-flight tasks complete under old thresholds
+  5. New tasks use updated thresholds
+
+Example adjustment at $15/ERG:
+  Tier 0: 0.01 → 0.001 ERG ($0.015)
+  Tier 1: 0.1 → 0.01 ERG ($0.15)
+  Tier 2: 1 → 0.1 ERG ($1.50)
+  Tier 3: 10 → 1 ERG ($15)
+  Tier 4: 100 → 10 ERG ($150)
+  
+  Bond percentages stay the same — game theory unchanged.
+```
+
+**VERDICT: DEFENSE HOLDS — the game theory is ERG-denominated and scale-invariant. The bond ratio (not absolute value) is what deters fraud. Governance-adjusted thresholds handle price volatility without oracle risk. Added governance response protocol.**
+
+---
+
+### 10.5 Scenario 5: The Long Con (1 year, multi-task exit scam)
+
+**Attacker profile:** Builds perfect reputation over 12 months (100+ tasks, all honest, diverse counterparties). Then simultaneously claims the 5 highest-value tasks and delivers garbage on all 5.
+
+**Step-by-step:**
+
+```
+Phase 1: Build reputation (12 months)
+  Tasks completed: 200+ across all tiers
+  Reputation: top-tier, high diversity score
+  Cumulative value: 500+ ERG transacted
+  Net earnings: ~500 ERG (after fees, real compute costs)
+  Status: Tier 4, one of the most reputable nodes on the platform
+
+Phase 2: The exit scam
+  Step 1: Claim Task A (100 ERG) — post 50 ERG bond
+  Step 2: Claim Task B (100 ERG) — post 50 ERG bond  
+  Step 3: Claim Task C (100 ERG) — post 50 ERG bond
+  Step 4: Claim Task D (100 ERG) — post 50 ERG bond
+  Step 5: Claim Task E (100 ERG) — post 50 ERG bond
+
+  Total bonds posted: 250 ERG
+  Total escrowed payments: 500 ERG (held in Payment Resolution Boxes)
+```
+
+**⚠️ CRITICAL GAP IDENTIFIED: Can a node claim 5 tasks simultaneously?**
+
+```
+Current system: NOTHING prevents a node from claiming multiple tasks 
+in the same claim window or across overlapping windows.
+
+This is a problem because:
+  - Bond capital: 5 × 50 ERG = 250 ERG — expensive but possible
+  - If even ONE escrow somehow releases without delivery 
+    (e.g., non-deterministic service, cross-validation fails):
+    attacker nets 99 ERG from that task
+  - Reputation damage is the same whether you fail on 1 or 5 tasks
+  - Simultaneous claims amplify the potential damage
+
+The 1-year reputation investment makes each individual task win 
+likely (high rep = high selection probability). With enough capital 
+for bonds, claiming 5 tasks is feasible.
+```
+
+**Profit/loss analysis (worst case for system — all 5 tasks are non-deterministic):**
+
+```
+If attacker delivers garbage on all 5 and fraud goes undetected:
+  Gain: 5 × 99 ERG = 495 ERG
+  Loss: 5 × 50 ERG bonds = 250 ERG (forfeited on dispute)
+  Net gain: 245 ERG
+  
+  PLUS: 12 months of honest earnings (~500 ERG) already banked
+  MINUS: reputation destroyed, no future earnings
+
+  Total lifetime: 500 + 245 = 745 ERG earned
+  vs honest alternative: 500 + 500 (next 12 months) = 1,000 ERG
+  
+  Still unprofitable! But the margin is thinner with 5 simultaneous tasks.
+  
+If cross-validation catches even 2 of 5:
+  Gain: 3 × 99 = 297 ERG
+  Loss: 5 × 50 = 250 ERG (all bonds forfeited once fraud detected)
+  Net: 47 ERG — barely profitable, with 12 months invested
+  
+If cross-validation catches 3+:
+  Net: negative
+```
+
+**⚠️ NEW FIX REQUIRED: Concurrent Task Claim Limit.**
+
+This is the one scenario where the existing defenses get uncomfortably thin. The fix:
+
+```
+CONCURRENT_CLAIM_LIMIT: Maximum active (uncompleted) task claims per address.
+
+  Tier 0-1: max 3 concurrent claims
+  Tier 2:   max 3 concurrent claims  
+  Tier 3:   max 2 concurrent claims
+  Tier 4:   max 2 concurrent claims
+
+Rationale: Higher tiers have higher-value tasks, so fewer concurrent 
+claims are needed for throughput. A Tier 4 node with 2 × 100 ERG tasks 
+is already handling 200 ERG of work — plenty.
+
+This limits the exit scam:
+  Max simultaneous theft attempt: 2 × 100 ERG = 200 ERG
+  Bonds at risk: 2 × 50 ERG = 100 ERG
+  Max net gain (if both escape detection): 2 × 99 - 100 = 98 ERG
+  vs future earnings destroyed: ~500 ERG/year
+  
+  Result: DEEPLY UNPROFITABLE even in best case.
+```
+
+**Additionally: Reputation velocity limit.**
+
+```
+EPOCH_VALUE_CAP: Maximum total ERG value of tasks a node can claim 
+per epoch (720 blocks ≈ 24h).
+
+  Tier 0-1: 1 ERG/epoch
+  Tier 2:   10 ERG/epoch
+  Tier 3:   50 ERG/epoch  
+  Tier 4:   200 ERG/epoch
+
+This prevents flash-accumulation of high-value claims.
+A Tier 4 node can process up to 200 ERG of tasks per day — 
+plenty for legitimate operations, but limits exit scam velocity.
+```
+
+**VERDICT: DEFENSE HELD (barely) without fixes — honest earning always exceeds theft. WITH the concurrent claim limit and velocity cap, the exit scam is definitively unprofitable by a 5:1+ margin.**
+
+---
+
+### 10.6 Fixes Implemented (Changes to Existing Sections)
+
+Based on the 5 whale-scale scenarios, we identified and implemented these mechanism additions:
+
+**Fix 1: Protocol-Enforced Maximum Task Value (from Scenario 2)**
+
+Added to Contract 1 (Service Request Box) spending conditions:
+```scala
+// Enforce maximum task value per active tier configuration
+val maxTaskValue = MAX_TIER_VALUE  // Currently 100 ERG (Tier 4 cap)
+require(payment <= maxTaskValue)
+```
+Tasks exceeding the protocol maximum are rejected at the contract level. Clients requiring larger jobs must split them into subtasks.
+
+**Fix 2: Concurrent Task Claim Limit (from Scenario 5)**
+
+New constraint in the claim path of Contract 1:
+```scala
+// Count active (uncompleted) claims for this node address
+// via data inputs referencing open Payment Resolution Boxes
+val activeClaims = CONTEXT.dataInputs.filter { box =>
+  box.R4[Coll[Byte]].get == claimantAddress && 
+  box.propositionBytes == PAYMENT_RESOLUTION_SCRIPT
+}.size
+val maxConcurrent = if (tierLevel <= 2) 3 else 2
+require(activeClaims < maxConcurrent)
+```
+
+**Fix 3: Epoch Value Velocity Cap (from Scenario 5)**
+
+New constraint tracking cumulative claimed value per epoch:
+```scala
+// R10 (or auxiliary box): tracks cumulative value claimed in current epoch
+// Epoch = 720 blocks (24h). Resets each epoch.
+val epochCap = EPOCH_VALUE_CAPS(tierLevel)  // [1, 1, 10, 50, 200] ERG
+val claimedThisEpoch = getCurrentEpochClaims(claimantAddress)
+require(claimedThisEpoch + payment <= epochCap)
+```
+
+**Fix 4: Enhanced Ring Detection — Eigenvalue Analysis (from Scenario 3)**
+
+Added to §4.8 Anti-Gaming Layers (new Layer 7):
+```
+Layer 7: Topology-Scored — Local clustering coefficient compared to 
+network average. Nodes with clustering > 2× network mean receive 
+progressive reputation dampening. Catches coordinated rings up to 
+~30 members via eigenvalue decomposition of the rating adjacency matrix.
+```
+
+**Fix 5: Governance Price Response Protocol (from Scenario 4)**
+
+Added to §9.4 ERG Price Volatility:
+```
+Trigger: ERG price moves >3× from last threshold calibration.
+Process: Treasury multi-sig proposes updated thresholds → 1000-block 
+time-lock → new config contract deployed → in-flight tasks unaffected.
+No oracle dependency. Quarterly review cadence.
+```
+
+---
+
+### 10.7 Summary Scorecard
+
+| Scenario | Attacker Capital | Held? | Key Defense | Fix Required? |
+|----------|-----------------|-------|-------------|---------------|
+| 1. Patient Whale | 10,000 ERG | ✅ YES | Escrow + 50% bond | No — tier-scaled bonds already sufficient |
+| 2. 5,000 ERG Bounty | 5,000 ERG | ✅ YES | 100 ERG protocol cap | Yes — enforce max in contract |
+| 3. Coordinated Cartel | 10,000 ERG | ✅ YES* | Diversity + escrow | Yes — enhanced ring detection |
+| 4. Price Shock | N/A | ✅ YES | Ratio-based deterrence | Yes — governance response protocol |
+| 5. Long Con (multi-exit) | 10,000 ERG | ✅ YES* | Escrow + concurrent limits | Yes — claim limit + velocity cap |
+
+*\*Held before fixes but with thinner margins. Fixes provide comfortable safety margin.*
+
+**The fundamental insight:** Escrow is the unbreakable foundation. Every whale-scale attack ultimately fails because the attacker never holds the payment until delivery is confirmed. Bonds, reputation, and detection layers are defense-in-depth — but escrow is the wall. You can't steal what you never hold.
+
+---
+
+## 11. Open Questions for Josemi
 
 ### Architecture Questions
 
