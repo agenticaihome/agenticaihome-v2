@@ -200,7 +200,7 @@ Solves the retaliatory rating problem cleanly. This is a known good mechanism (K
 The tier-gating of task values is the right answer to reputation laundering. The math on making cheating unprofitable at each tier is sound.
 
 ### ✅ Honest Limitations Section
-The doc explicitly states what the system cannot do. This is rare and valuable. The acknowledgment that ZK-ML is years away, that IPFS persistence isn't guaranteed, and that subtle quality degradation is only caught statistically — this is intellectual honesty.
+The doc explicitly states what the system cannot do. This is rare and valuable. The acknowledgment that ZK-ML is years away, that off-chain data persistence isn't guaranteed, and that subtle quality degradation is only caught statistically — this is intellectual honesty.
 
 ### ✅ Defense-in-Depth Philosophy
 No single mechanism is presented as a silver bullet. The layered approach means the system degrades gracefully — even if 2-3 layers fail, the remaining layers provide meaningful security.

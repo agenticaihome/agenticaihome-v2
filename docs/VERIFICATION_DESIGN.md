@@ -26,7 +26,7 @@
 
 Three constraints shape every decision:
 
-1. **Zero backends.** Ergo blockchain + IPFS/content-addressed storage + Celaut P2P. No servers, no databases, no indexers we control.
+1. **Zero backends.** Ergo blockchain + Celaut P2P (content-addressed storage + execution). No servers, no databases, no indexers we control.
 2. **eUTXO model.** Ergo boxes with registers R4-R9 (6 user registers), spent via ErgoScript guard conditions. No global mutable state — everything flows through box chains.
 3. **Josemi's gas model compatibility.** Client locks ERG → node claims after deadline → node executes → both rate. We augment this flow; we don't replace it.
 
@@ -126,17 +126,17 @@ If client never reveals salt: after timeout, node's receipt stands unchallenged.
 
 ---
 
-### Hole 3: IPFS Unreliable — Data Gets Garbage Collected
+### Hole 3: Off-Chain Data Availability
 
-**Problem:** Receipt data vanishes from IPFS.
+**Problem:** Receipt data stored off-chain could disappear.
 
-**Fix: Multi-Layer Storage**
+**Fix: Multi-Layer Storage (Celaut P2P, no IPFS)**
 
-- **Layer 1: On-chain hashes** (permanent, ~100 bytes per task)
-- **Layer 2: Celaut P2P network** (nodes self-interested in pinning their receipts)
+- **Layer 1: On-chain hashes** (permanent, ~100 bytes per task on Ergo)
+- **Layer 2: Celaut P2P network** (nodes self-interested in keeping their receipts available — receipts prove honest work. Content-addressed by hash.)
 - **Layer 3: Client-side archival** (client software archives locally)
 
-**Realistic stance:** Most receipt data matters for ~30 days (dispute window). After that, reputation effects are baked in. On-chain hashes survive permanently. Durable IPFS pinning (Filecoin bridges etc.) is deferred to later phases.
+**Realistic stance:** Most receipt data matters for ~30 days (dispute window). After that, reputation effects are baked in. On-chain hashes survive permanently.
 
 ---
 
@@ -185,7 +185,7 @@ No receipt = no payment. Enforceable on-chain, no backend.
 
 - **Tier 0: Hash-only (default)** — on-chain: `input_commitment`, `output_hash`. Reveals nothing. Disputes require client to reveal input.
 - **Tier 1: Encrypted receipt** — Receipt data encrypted with threshold key. Only decrypted during disputes.
-- **Tier 2: Public receipt** — Full data on IPFS. Maximum verifiability.
+- **Tier 2: Public receipt** — Full data on Celaut P2P. Maximum verifiability.
 
 **What's genuinely impossible today:** Fully private verification (nobody sees input) requires ZK-ML. Not production-ready for large models. 2-3 years out.
 
@@ -446,7 +446,7 @@ PHASE 1: TASK CREATION (Client)
   │   R9: (privacy_tier, verification_tier)  │
   │       packed as (tier << 4 | ver_tier)   │
   └──────────────────────────────────────────┘
-  Client uploads encrypted input to Celaut P2P / IPFS.
+  Client uploads encrypted input to Celaut P2P.
 
 PHASE 2: NODE CLAIMS TASK
 ═════════════════════════
@@ -507,7 +507,7 @@ ExecutionReceipt_v4 {
   node_id:            Address
   input_commitment:   Blake2b256      // H(input ‖ client_salt)
   output_hash:        Blake2b256
-  output_uri:         String          // IPFS CID or Celaut P2P
+  output_uri:         String          // Celaut P2P content address
   exec_params: {
     model_id:         String
     temperature:      Float
@@ -525,7 +525,7 @@ ExecutionReceipt_v4 {
   node_sig:           Signature
   timestamp:          Long
   storage_proofs: [{
-    storage_type:     Enum {IPFS, CELAUT_P2P}
+    storage_type:     Enum {CELAUT_P2P}
     content_cid:      String
   }]
 }
@@ -539,7 +539,7 @@ ExecutionReceipt_v4 {
 - R8: `node_sig` (64 bytes)
 - R9: `receipt_cid` (46 bytes)
 
-**Total on-chain: ~238 bytes per receipt.** Full receipt on IPFS/Celaut P2P.
+**Total on-chain: ~238 bytes per receipt.** Full receipt on Celaut P2P.
 
 ---
 
@@ -559,7 +559,7 @@ ExecutionReceipt_v4 {
 
 **Deferred to later phases:**
 - CanaryTaskBox / CanaryResultBox — canary system complexity warrants separate phase
-- PinningBox — durable IPFS pinning is nice-to-have
+- PinningBox — durable pinning is nice-to-have
 - DisputeBox / ChallengeBox — Schelling point panels are Phase 4+
 - OutputCommitBox — client output commitment before receipt is nice-to-have, not critical
 
@@ -701,7 +701,7 @@ R9: reputation_tier (Int)
 1. **Perfect privacy + perfect verifiability.** Fundamentally in tension. ZK-ML needed, 2-3 years away.
 2. **Verify subjective quality on-chain.** "Was this essay good?" requires human judgment.
 3. **Catch subtle quality degradation per-task.** A node using 4-bit quantized weights produces slightly worse output that passes similarity checks. Caught statistically over time, not per-task. The slow-drain attack is real.
-4. **Guarantee IPFS data permanence.** Incentivize, can't guarantee.
+4. **Guarantee off-chain data permanence.** Incentivize, can't guarantee.
 5. **Prevent wealthy-attacker panel corruption.** Same limitation as jury systems.
 6. **Cryptographically prove LLM output correctness.** See [Future Research](#future-research). The system is economically secured, not cryptographically secured.
 
@@ -755,7 +755,7 @@ The previous estimate of 20 weeks was unrealistic. Here's an honest assessment:
 ### Phase 5: Advanced (When Ready)
 - [ ] WASM deterministic replay (pending Josemi's input + feasibility research)
 - [ ] ZK-ML integration (when EZKL/Modulus mature)
-- [ ] Durable IPFS pinning contracts
+- [ ] Durable storage pinning contracts
 
 **Strong recommendation:** Build Phase 1, deploy it, learn from it, THEN refine Phase 2 design. Don't design all 5 phases upfront — the lessons from Phase 1 will invalidate assumptions in Phase 3+.
 

@@ -24,7 +24,7 @@ Together: the full stack, fully decentralized.
 5. Both parties **rate each other** via commit-reveal — bilateral reputation updates on-chain
 
 ### What Makes Us Different
-- **No backend.** The app is a static webpage. Deploy it on GitHub Pages, IPFS, anywhere. Can't be shut down.
+- **No backend.** The app is a static webpage. Deploy it on GitHub Pages, anywhere. Can't be shut down.
 - **No database.** All data lives on the Ergo blockchain. No server to hack, no company to subpoena.
 - **Receipt-gated payment.** ErgoScript won't release ERG without proof of execution. No receipt = money back to client.
 - **1% fee.** Nodes keep 99% of earnings. Compare to 20-30% on competing platforms.

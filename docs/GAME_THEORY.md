@@ -190,7 +190,7 @@ For truly subjective outputs (creative writing, design), exact verification is i
 
 ### Making It Concrete: The Execution Receipt Standard
 
-**Zero backends. Zero databases. Zero servers.** The entire verification layer runs on Ergo + IPFS + Celaut P2P. No central infrastructure to compromise or maintain.
+**Zero backends. Zero databases. Zero servers.** The entire verification layer runs on Ergo + Celaut P2P. No central infrastructure to compromise or maintain.
 
 Every task completion on AIH produces a public **Execution Receipt**:
 
@@ -201,8 +201,8 @@ ExecutionReceipt {
   node_id:        Address         // executing node
   input_hash:     Hash            // H(input data)
   output_hash:    Hash            // H(output data)
-  input_uri:      URI             // where to download full input (IPFS or Celaut P2P)
-  output_uri:     URI             // where to download full output (IPFS or Celaut P2P)
+  input_uri:      URI             // where to download full input (Celaut P2P)
+  output_uri:     URI             // where to download full output (Celaut P2P)
   exec_params:    JSON            // model, temperature, seed, resource limits
   exec_log_uri:   URI             // optional: full execution trace
   timestamp:      Long            // block height at completion
@@ -212,12 +212,12 @@ ExecutionReceipt {
 
 **Storage — fully decentralized:**
 - **On-chain (Ergo):** Compact receipt hash stored in the transaction's registers. Tiny, cheap, permanent, immutable.
-- **Off-chain (IPFS / Celaut P2P):** Full receipt data (inputs, outputs, logs) stored content-addressed. No server needed — data lives on the peer network. Content hash = built-in integrity check.
-- **Verification:** Pure client-side. Anyone downloads the receipt from IPFS, downloads the service by hash, re-executes with the same input, compares output hashes. No backend involved. Same way Bitcoin nodes independently validate blocks.
+- **Off-chain (Celaut P2P):** Full receipt data (inputs, outputs, logs) stored content-addressed. No server needed — data lives on the peer network. Content hash = built-in integrity check.
+- **Verification:** Pure client-side. Anyone downloads the receipt from Celaut P2P, downloads the service by hash, re-executes with the same input, compares output hashes. No backend involved. Same way Bitcoin nodes independently validate blocks.
 
 **No backend needed because:**
 - Ergo blockchain IS the database (receipt hashes, reputation state, task boxes)
-- IPFS IS the file storage (receipt data, execution logs)
+- Celaut P2P IS the file storage (receipt data, execution logs)
 - Celaut P2P IS the compute layer (service execution, re-verification)
 - Rating dampening is computed independently by each participant (like Bitcoin consensus)
 
@@ -328,14 +328,14 @@ For deterministic services (Celaut's strength):
 
 ## Open Questions for Josemi
 
-1. ~~In Celaut's deterministic execution model, can we get output hashes cheaply?~~ **ANSWERED: Yes — Execution Receipts solve this. Output hashes published on-chain/IPFS.**
+1. ~~In Celaut's deterministic execution model, can we get output hashes cheaply?~~ **ANSWERED: Yes — Execution Receipts solve this. Output hashes published on-chain/Celaut P2P.**
 2. How does Celaut handle service versioning? Same hash = same code forever? Or can services be updated? *(Still open — affects receipt verification)*
 3. What's the minimum viable node registration cost that prevents sybils without excluding genuine participants?
 4. For the commit-reveal pattern on Ergo — do you see any eUTXO constraints that make this difficult?
 5. Does Celaut already have resource commitment proofs? If nodes prove they allocated X GPU hours, that's a powerful anti-gaming signal.
 6. **NEW:** For the Execution Receipt standard — does Celaut already produce execution logs/traces that we can use? Or do we need to build that layer?
 7. **NEW:** For semi-deterministic services (LLMs), what level of "bounded verification" does Josemi think is practical? Exact output match vs. statistical quality check?
-8. **NEW:** Storage for receipts — IPFS, Ergo extension blocks, or Celaut's own P2P layer?
+8. **NEW:** Storage for receipts — Celaut P2P or Ergo extension blocks?
 
 ---
 

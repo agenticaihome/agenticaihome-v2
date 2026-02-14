@@ -17,7 +17,7 @@ When a client pays ERG for AI compute, how do we know the node actually did the 
 
 ## The Solution: Layered Economic Deterrence
 
-Everything runs on Ergo + IPFS + Celaut P2P. No backends.
+Everything runs on Ergo + Celaut P2P. No backends.
 
 ### Layer 1: Receipt-Gated Payment (Phase 1)
 The node literally cannot claim payment without publishing an execution receipt on-chain. ErgoScript guard requires a ReceiptBox in the same transaction. No receipt = ERG returns to client. **This alone eliminates the take-and-run attack.**
