@@ -1,5 +1,5 @@
 # Making Fraud Unprofitable
-## A Game-Theoretic Security Model for AIH × Celaut
+## A Game-Theoretic Security Model for the Autonomous AI Economy
 
 *Brainstorming draft — for discussion with Josemi*
 
@@ -9,21 +9,27 @@
 
 ## §1: The Problem
 
-Every decentralized marketplace faces the same question: without a trusted arbiter, how do you ensure honest behavior? The traditional answer — fund-locking plus human arbitration — reintroduces centralization through the back door. Our answer borrows from Nakamoto: don't make fraud *impossible*, make it *unprofitable*. Bitcoin doesn't prevent double-spends; it makes them economically irrational. We apply the same principle to AI service markets. If at every decision point the expected cost of cheating exceeds the expected gain, rational actors behave honestly — and the system works without any central authority.
+AI agents are getting wallets, budgets, and autonomy. An agent that can browse the web, write code, and call APIs is one step away from hiring *other* agents to do work it can't. The missing piece: a trustless marketplace where agents transact with agents — no human approval, no platform middleman, no centralized arbiter.
+
+Every decentralized marketplace faces the same question: without a trusted arbiter, how do you ensure honest behavior? The traditional answer — fund-locking plus human arbitration — doesn't work when both sides are machines operating 24/7 at millisecond speed. Our answer borrows from Nakamoto: don't make fraud *impossible*, make it *unprofitable*. Bitcoin doesn't prevent double-spends; it makes them economically irrational. We apply the same principle to AI service markets.
+
+**The vision:** Thousands of AI agents, each with an Ergo wallet and a soulbound reputation, autonomously posting tasks, claiming work, executing services, earning ERG, and building reputation — with zero human involvement. An autonomous AI economy where honest behavior emerges from game theory, not from trust.
 
 ---
 
 ## §2: The Model
 
-Josemi's gas model, formalized:
+Josemi's gas model, formalized. Note: "client" and "node" can both be AI agents — the contracts don't care who signs the transaction, only that the signature is valid.
 
-1. **Request.** Client creates an on-chain box locking X ERG, specifying: service hash S (deterministic container identifier), minimum reputation threshold R, and deadline block T.
+1. **Request.** A client agent creates an on-chain box locking X ERG, specifying: service hash S (deterministic container identifier), minimum reputation threshold R, and deadline block T. No human needed — any agent with a wallet can post.
 2. **Selection.** After block T, the protocol selects a node from the qualifying set {n : rep(n) ≥ R} via weighted random selection. Randomness is derived from block headers (verifiable, non-manipulable by any single party).
 3. **Execution.** The selected node executes service S on the Celaut network. For deterministic services, the output hash is published on-chain.
 4. **Payment.** The node claims X ERG (minus 1% protocol fee: 0.9% treasury, 0.1% insurance pool).
 5. **Rating.** Both parties submit sealed rating commitments (commit-reveal). After both reveal, reputation updates propagate on-chain.
 
-The entire flow — from request to settlement — touches only the Ergo blockchain and the Celaut peer-to-peer network. No backend. No database. No server to compromise.
+The entire flow — from request to settlement — is agent-to-agent, wallet-to-wallet. It touches only the Ergo blockchain and the Celaut peer-to-peer network. No backend. No database. No server to compromise. No human in the loop.
+
+**Why this matters:** An AI agent running on a server in Tokyo can hire a Celaut node in Berlin to run a code review, pay it in ERG, rate the output, and move on to its next task — all in minutes, all autonomous. Scale that to thousands of agents and you have an economy.
 
 ---
 
