@@ -70,38 +70,59 @@ Services are identified by **hash**, not by name. Nodes are interchangeable comm
 ### Data Flow: Service Request to Completion
 
 ```
-Step 1: CLIENT                    Step 2: ERGO CHAIN
-┌──────────────┐                 ┌──────────────────────┐
-│ Choose service│                │ Service Request Box   │
-│ hash S        │───creates───▶  │ R4: Service Hash S    │
-│ Set payment X │                │ R5: Payment X nanoERG │
-│ Set min rep R │                │ R6: Min Reputation R  │
-│ Set deadline T│                │ R7: Deadline Block T  │
-│               │                │ R8: Client Address    │
-└──────────────┘                 └──────────┬───────────┘
-                                            │
-                                            │ Nodes scan chain
-                                            ▼
-Step 3: NODE SELECTION            Step 4: EXECUTION
-┌──────────────────────┐         ┌──────────────────────┐
-│ After block T:        │         │ Selected node runs    │
-│ Weighted random       │         │ service S on Celaut   │
-│ selection among       │────────▶│ via Nodo framework    │
-│ qualifying nodes      │         │ Posts delivery bond   │
-│ (rep ≥ R)             │         │ Deterministic exec    │
-└──────────────────────┘         └──────────┬───────────┘
-                                            │
-                                            ▼
-Step 5: SETTLEMENT                Step 6: REPUTATION
-┌──────────────────────┐         ┌──────────────────────┐
-│ Payment resolves:     │         │ Batched rating:       │
-│ 99% → Node           │         │ Both parties sign     │
-│ 0.9% → Treasury      │         │ rating commitments    │
-│ 0.1% → Insurance Pool│         │ off-chain. Settled    │
-│ + Gas consumed by     │         │ on-chain periodically │
-│   Celaut node         │         │ (every ~100 blocks).  │
-│ Bond returned to node │         │ EGO tokens updated.   │
-└──────────────────────┘         └──────────────────────┘
+Step 1: CLIENT
+┌──────────────────────────────────────┐
+│ Choose service hash S                │
+│ Set payment X ERG, min rep R,        │
+│ deadline block T                     │
+└──────────────────┬───────────────────┘
+                   │ creates tx
+                   ▼
+Step 2: ERGO CHAIN
+┌──────────────────────────────────────┐
+│ Service Request Box appears on-chain │
+│ R4: Service Hash S                   │
+│ R5: Payment X nanoERG                │
+│ R6: Min Reputation R                 │
+│ R7: Deadline Block T                 │
+│ R8: Client Address                   │
+└──────────────────┬───────────────────┘
+                   │ nodes scan chain
+                   ▼
+Step 3: NODE SELECTION
+┌──────────────────────────────────────┐
+│ After block T: weighted random       │
+│ selection among qualifying nodes     │
+│ (rep ≥ R). Randomness from block     │
+│ headers — verifiable, fair.          │
+└──────────────────┬───────────────────┘
+                   │ winner selected
+                   ▼
+Step 4: EXECUTION
+┌──────────────────────────────────────┐
+│ Selected node runs service S on      │
+│ Celaut via Nodo framework.           │
+│ Deterministic container execution.   │
+└──────────────────┬───────────────────┘
+                   │ execution complete
+                   ▼
+Step 5: SETTLEMENT
+┌──────────────────────────────────────┐
+│ Payment resolves on-chain:           │
+│ 99% → Node                          │
+│ 0.9% → Treasury                     │
+│ 0.1% → Insurance Pool               │
+│ + Gas consumed by Celaut node        │
+└──────────────────┬───────────────────┘
+                   │
+                   ▼
+Step 6: REPUTATION
+┌──────────────────────────────────────┐
+│ Both parties sign rating commitments │
+│ off-chain. Settled on-chain in       │
+│ batches (~every 100 blocks).         │
+│ EGO tokens updated.                  │
+└──────────────────────────────────────┘
 ```
 
 ### What Lives Where
