@@ -2,6 +2,8 @@
 
 *What to build first, and why. Audited for feasibility — no fantasy features.*
 
+*Companion docs: [ONE_PAGER.md](./ONE_PAGER.md) | [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md)*
+
 ---
 
 ## Phase 1: Foundation (Weeks 1-4)

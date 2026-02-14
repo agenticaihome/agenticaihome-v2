@@ -17,7 +17,9 @@
 
 **Constraints:** Zero backends (Ergo + Celaut P2P only). eUTXO model (R4-R9). Compatible with Josemi's gas model.
 
-**Services:** Identified by content hash (Celaut architecture). Same hash = same code = deterministic container. A service is just a binary — download by hash, execute, verify output.
+**Services:** Identified by content hash (Celaut architecture). Same hash = same code = deterministic container. A service is just a binary — download by hash, execute, verify output. Agents discover services via the **Service Template Registry** — a public catalog (JSON on IPFS, moving on-chain later) mapping common services to their content hashes, input schemas, and pricing.
+
+**Agent SDK:** TypeScript library wrapping the full lifecycle: `aih.discover(serviceHash)` → `aih.postTask(service, input, payment)` → `aih.pollReceipt(taskId)` → `aih.rate(receiptId, score)`. The SDK is the primary integration point — agents won't compose raw ErgoScript transactions.
 
 **Reputation model (from Josemi's Game of Prompts):** Reputation has two components:
 1. **On-chain stake** — ERG burned/sacrificed. Skin in the game.
@@ -122,16 +124,18 @@ Applied to clients too — new clients can only post micro-tasks.
 
 Both parties submit `H(rating ‖ salt)` within N blocks, then reveal. Neither can adjust based on the other's rating. Non-revealer gets a small penalty and the other's rating stands.
 
-### The 6 Box Types
+### The 6 Box Types (MVP)
 
 ```
 1. TaskEscrowBox         — Payment + input commitment + tiers
 2. ReceiptBox            — Execution proof (required for payment)
-3. FailureReceiptBox     — Legitimate failure reporting
+3. FailureReceiptBox     — Legitimate failure reporting → auto-refund
 4. BondBox               — Node collateral with active task counter
 5. RatingBox             — Commit-reveal bilateral rating
 6. VerificationBountyBox — 2% split from task, claimable by verifiers
 ```
+
+Note: Earlier designs included a 7th box (NodeStatusBox) — removed as redundant with BondBox + reputation data inputs.
 
 ### Register Maps (R4-R9 only)
 
@@ -303,19 +307,21 @@ EZKL, Modulus Labs, and others are working on ZK proofs for ML inference. Not pr
 
 ## 9. Implementation Phases
 
-**Phase 1: MVP**
-Receipt-gated payment, client input commitment, failure receipts, basic reputation tracking.
+See [ROADMAP.md](./ROADMAP.md) for the practical build order and feature audit.
 
-**Phase 2: Economic Security**
-Node bonding (counter-box), verification bounties, insurance pool, reputation tiers, commit-reveal rating.
+**Phase 1: Foundation** (Roadmap Weeks 1-4)
+Agent SDK v0.1, service template registry, explorer dashboard, on-chain seed derivation, failure receipt auto-refund. Receipt-gated payment, client input commitment, basic reputation tracking.
 
-**Phase 3: Active Verification**
-Canary tasks (start 1-2%, scale to 5%), tiered verification by task value.
+**Phase 2: Economic Security** (Roadmap Months 2-3)
+Node bonding (counter-box), verification bounties, insurance pool, reputation tiers, commit-reveal rating. Reputation decay, batch task posting, dry-run quotes.
+
+**Phase 3: Active Verification** (Roadmap Months 4+)
+Canary tasks (start 1-2%, scale to 5%), tiered verification by task value. Dutch auction pricing, reputation portability, one-click node setup.
 
 **Phase 4+: When Ready**
 Schelling point dispute panels, embedding similarity verification, privacy tiers, WASM replay, ZK-ML.
 
-Build Phase 1 first. Learn from it. Then refine Phase 2.
+Build Phase 1 first. See what breaks. Then build the next thing.
 
 ---
 
