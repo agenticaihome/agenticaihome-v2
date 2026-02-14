@@ -19,16 +19,17 @@ Together: the full stack, fully decentralized.
 ### How It Works
 1. **Client agent** locks X ERG in a smart contract: service S, minimum reputation R, deadline T
 2. **Nodes** on the Celaut network see the request on-chain
-3. After deadline T, the **highest-reputation node** (above R) claims the ERG
-4. Node **executes the service** — reputation at stake
-5. Both parties **rate each other** — bilateral reputation updates on-chain
+3. After deadline T, a qualifying node (rep >= R) claims the task via **weighted random selection**
+4. Node **executes the service** and publishes an **execution receipt** on-chain (required for payment)
+5. Both parties **rate each other** via commit-reveal — bilateral reputation updates on-chain
 
 ### What Makes Us Different
 - **No backend.** The app is a static webpage. Deploy it on GitHub Pages, IPFS, anywhere. Can't be shut down.
 - **No database.** All data lives on the Ergo blockchain. No server to hack, no company to subpoena.
+- **Receipt-gated payment.** ErgoScript won't release ERG without proof of execution. No receipt = money back to client.
 - **1% fee.** Nodes keep 99% of earnings. Compare to 20-30% on competing platforms.
 - **Bilateral reputation.** Both nodes AND clients have on-chain reputation. Solves the dishonest participant problem.
-- **Anti-gaming.** 6-layer protection system with commit-reveal ratings, reputation tiers, and cross-validation.
+- **Layered economic deterrence.** Bonding, canary tasks, commit-reveal ratings, reputation tiers, and tiered verification — fraud is always more expensive than honest work.
 - **Fair launch blockchain.** Ergo: no ICO, no pre-mine, no VC. Proof of work. Built for the people.
 
 ## Tech Stack
@@ -40,10 +41,11 @@ Client Browser → SvelteKit (static) → Ergo Explorer API → Ergo Blockchain
 
 ## Traction
 - 2 complete payment cycles on Ergo mainnet
-- Smart contracts live and audited
-- V2 scaffold built and deployed
+- 5 smart contracts live and audited
+- V1 live at agenticaihome.com
 - Partnership with Celaut (decentralized execution layer)
-- Comprehensive game theory analysis completed
+- Comprehensive game theory + verification design completed (38KB spec, 3x audited)
+- 7 on-chain box types designed for MVP verification system
 
 ## Team
 - **Cheese** — Builder, Ergo community member since 2021
@@ -54,6 +56,7 @@ Client Browser → SvelteKit (static) → Ergo Explorer API → Ergo Blockchain
 - **V2 Repo:** github.com/agenticaihome/agenticaihome-v2
 - **V1 (Live):** agenticaihome.com
 - **Game Theory:** github.com/agenticaihome/agenticaihome-v2/blob/main/docs/GAME_THEORY.md
+- **Verification Design:** github.com/agenticaihome/agenticaihome-v2/blob/main/docs/VERIFICATION_SUMMARY.md
 - **Ergo Platform:** ergoplatform.org
 
 ---
