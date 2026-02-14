@@ -181,12 +181,10 @@ We need 7 core ErgoScript contracts. Each is a spending condition on a UTXO box.
     HEIGHT < deadline + CLAIM_WINDOW &&
     // Data input 0: claimant's EGO reputation box
     // CRITICAL: verify claimant owns the referenced EGO box
-    CONTEXT.dataInputs(0).R4[SigmaProp].get == OUTPUTS(0).R4[SigmaProp].isDefined &&
+    val claimantPk = CONTEXT.dataInputs(0).R4[SigmaProp].get
     CONTEXT.dataInputs(0).tokens.exists { t =>
       t._1 == EGO_TOKEN_ID && t._2 >= minRep
     } &&
-    // Claimant must sign the transaction (proves EGO ownership)
-    CONTEXT.dataInputs(0).R4[SigmaProp].get &&
     // Verifiable randomness: use block header at HEIGHT as seed
     // Selection verified by the claim transaction structure
     // (off-chain computed, on-chain verified)
@@ -197,7 +195,7 @@ We need 7 core ErgoScript contracts. Each is a spending condition on a UTXO box.
     OUTPUTS(1).propositionBytes == treasuryAddr &&
     OUTPUTS(2).value >= (payment / 1000) &&               // insurance
     OUTPUTS(2).propositionBytes == insuranceAddr
-  }
+  } && claimantPk  // claimant must sign (sigma protocol — evaluated separately from boolean checks)
   
   // Client reclaims after extended deadline (T + W + grace)
   val reclaimPath = {
@@ -218,6 +216,20 @@ The "highest rep wins" model creates a monopoly where top nodes capture all work
 - A node with 2× the reputation of another has 2× the probability — but never a guarantee. New nodes with minimum reputation still get a chance.
 - **Verifiable randomness** comes from the Ergo block header hash at block T+W+1 (the first block after the claim window closes). Block headers contain the `nonce` and `extensionHash` which are unpredictable before mining. We use `hash(blockHeader || taskBoxId)` as the seed, ensuring per-task uniqueness.
 - The selection is deterministic given the seed — any observer can verify the winner.
+
+**System constants (referenced throughout contracts):**
+
+| Constant | Value | Rationale |
+|----------|-------|-----------|
+| CLAIM_WINDOW | 30 blocks (~1h) | Long enough for global propagation, short enough to avoid stale tasks |
+| GRACE_BLOCKS | 60 blocks (~2h) | Gives client time to reclaim after failed selection |
+| DECAY_PERIOD | 64,800 blocks (~90 days) | Matches reputation half-life; inactive = stale |
+| DECAY_REWARD | 0.0005 ERG | Covers triggerer's tx fee (~0.001 ERG) with small margin; sustainable from box's 0.01 ERG over many cycles |
+| MIN_ERG | 0.001 ERG | Minimum task value — below this, tx fees dominate |
+| RESPONSE_WIN (R) | 720 blocks (~24h) | Client response window for delivery bond |
+| EXEC_WINDOW (E) | 720 blocks (~24h) | Default execution deadline (overridable per task) |
+
+**Tiebreaker for equal reputation:** When two or more nodes have exactly equal reputation in weighted random selection, the randomness seed deterministically resolves selection — equal-weight nodes get equal probability (no separate tiebreaker needed since the hash maps into a continuous range).
 
 **Why this is better than winner-take-all:** It creates a healthy market where reputation is an advantage, not an absolute barrier. New entrants can still win tasks (at lower probability), preventing ossification. This follows the **proportional selection** mechanism used in proof-of-stake systems (Kiayias et al., 2017 — Ouroboros).
 
@@ -287,7 +299,21 @@ The "highest rep wins" model creates a monopoly where top nodes capture all work
     ownerPk  // owner must sign
   }
   
-  isRatingResolution || decayPath || topUpPath
+  // Migration path: treasury multi-sig can migrate EGO boxes to new contract
+  // Gated by time-lock: migration tx must reference a "migration announcement"
+  // box that was created at least MIGRATION_DELAY (1000 blocks ≈ ~3.5 days) ago.
+  // This gives users time to exit if they disagree with the migration.
+  val migrationPath = {
+    val migrationBox = CONTEXT.dataInputs(1)  // migration announcement box
+    val migrationAge = HEIGHT - migrationBox.R7[Int].get  // announcement block stored in R7
+    migrationAge >= 1000 &&  // time-lock: 1000 blocks minimum
+    OUTPUTS(0).R4[SigmaProp].get == SELF.R4[SigmaProp].get && // same owner
+    OUTPUTS(0).tokens(0)._1 == EGO_TOKEN_ID &&  // preserve token
+    OUTPUTS(0).tokens(0)._2 == SELF.tokens(0)._2 &&  // preserve score
+    atLeast(2, Coll(TREASURY_PK1, TREASURY_PK2, TREASURY_PK3))  // multi-sig
+  }
+  
+  isRatingResolution || decayPath || topUpPath || migrationPath
 }
 ```
 
@@ -411,10 +437,11 @@ On-Chain Settlement (every ~100 blocks, or when batch is full):
   val clientAddr = SELF.R6[SigmaProp].get
   
   // Path 1: Client confirms delivery → bond returned to node
+  // Only client signature needed — node address is already in the box (R5)
+  // so the contract can enforce OUTPUTS(0) goes to node without node signing
   val deliveryConfirmed = {
     clientPk &&  // client signs confirmation
-    nodeAddr     // node must also sign (proves identity for output)
-    // Bond value goes to OUTPUTS(0) — node constructs the tx
+    OUTPUTS(0).propositionBytes == sigmaPropBytes(nodePk) // bond to node
   }
   
   // Path 2: Client flags non-delivery after exec deadline
@@ -488,10 +515,10 @@ Block T+W+E+R: Response deadline — client must confirm/flag by here
 
 | Contract | R4 | R5 | R6 | R7 | R8 | R9 |
 |----------|----|----|----|----|----|----|
-| Service Request | Service Hash | Payment | Min Rep | Deadline | Client PK | Params Hash |
-| EGO Reputation | Owner PK | Cumulative Value | Tier Level | Last Active | Rating Merkle | (client_rep, node_rep, first_active) |
-| Rating Batch | Batch Merkle | Batch Count | Settlement Deadline | Agg. Reveals | — | — |
-| Delivery Bond | Task ID | Node PK | Client PK | Exec Deadline | Response Deadline | — |
+| Service Request | Service Hash (Coll[Byte]) | Payment (Long) | Min Rep (Long) | Deadline (Int) | Client PK (SigmaProp) | Params Hash (Coll[Byte]) |
+| EGO Reputation | Owner PK (SigmaProp) | Cumulative Value (Long) | Tier Level (Long) | Last Active (Int) | Rating Merkle (Coll[Byte]) | (client_rep, node_rep, first_active) (Long, Long, Int) |
+| Rating Batch | Batch Merkle (Coll[Byte]) | Batch Count (Int) | Settlement Deadline (Int) | Agg. Reveals (Coll[Byte]) | — | — |
+| Delivery Bond | Task ID (Coll[Byte]) | Node PK (SigmaProp) | Client PK (SigmaProp) | Exec Deadline (Int) | Response Deadline (Int) | — |
 | Treasury | — | — | — | — | — | — |
 | Insurance Pool | — | — | — | — | — | — |
 
@@ -595,14 +622,7 @@ The cost exceeds the benefit before accounting for detection penalties.
 
 2. **Time gates:** Minimum blocks between tier promotions prevent speed-running.
 
-3. **Tier structure (value + time based):**
-   ```
-   Tier 0 (Open):    max 0.01 ERG  — no requirements (anyone)
-   Tier 1 (Novice):  max 0.1 ERG   — 0.1 ERG cumulative + 500 blocks active
-   Tier 2 (Skilled): max 1 ERG     — 1 ERG cumulative + 2000 blocks active
-   Tier 3 (Expert):  max 10 ERG    — 10 ERG cumulative + 5000 blocks active
-   Tier 4 (Elite):   max 100 ERG   — 100 ERG cumulative + 15000 blocks active
-   ```
+3. **Tier structure:** See §4.6 for full tier table with thresholds and time gates.
 
 4. **Why this resists micro-task farming:** To reach Tier 2, you need 1 ERG cumulative regardless of how many tasks that takes. The 1% fee means you paid 0.01 ERG to the platform along the way. Time gates add a minimum ~3 days. No volume of 0.001 ERG tasks gets you there faster than the economic reality allows.
 
@@ -1129,7 +1149,105 @@ ErgoScript contracts are immutable once deployed. If bugs are found:
 - **⚠️ We should add a migration spending path to Contract 2 (EGO box)** gated by treasury multi-sig + time-lock. This is a safety valve — not ideal for decentralization, but critical for a v1 system that may have bugs.
 - **Long-term:** Once contracts are battle-tested, deploy final immutable versions without migration paths.
 
-### 9.6 Cross-Contract Composition Risk
+### 9.6 Mechanism Edge Cases
+
+**minReputation = 0 bypass:** A client can set R6 (min reputation) to 0, allowing any node — including brand-new Sybil identities — to claim their task. This is **by design** for Tier 0: low-value tasks should be open to new entrants. However, the tier system caps the maximum task value per tier, so a minRep=0 task is limited to 0.01 ERG. For higher tiers, the contract should enforce a minimum minRep floor:
+```
+// In Contract 1: enforce tier-appropriate minimum reputation
+val tierMinRep = if (payment <= 10000000L) 0L          // Tier 0: ≤0.01 ERG
+                 else if (payment <= 100000000L) 10L    // Tier 1: ≤0.1 ERG
+                 else if (payment <= 1000000000L) 100L  // Tier 2: ≤1 ERG
+                 else 1000L                             // Tier 3+
+minRep >= tierMinRep
+```
+
+**EGO box race condition (decay vs claim):** If a triggerer submits a decay transaction on an EGO box at the same time the owner submits a task claim referencing that box as a data input, Ergo's UTXO model handles this cleanly: the claim uses the EGO box as a **data input** (not spent), while decay **spends** the box. Both transactions can be valid — the claim reads the pre-decay score, and the decay recreates the box with reduced score. If the decay tx is confirmed first, the claim's data input reference becomes stale and the claim tx is invalidated. The node would need to resubmit referencing the new (decayed) EGO box. This is a minor UX delay, not a security issue.
+
+**Insurance pool at zero:** If the insurance pool drops below 0.01 ERG (minimum viable for a verification spend), cross-validation pauses — no tasks are randomly selected for re-execution. This means the network operates on pure reputation incentives without active verification. **This is acceptable short-term** because: (1) the pool refills automatically from the 0.1% fee on every task, (2) the bilateral rating game still functions, and (3) delivery bonds still protect against non-delivery. However, prolonged pool exhaustion weakens deterrence against non-deterministic service fraud. The adaptive rate (§5.2) prevents pool exhaustion by reducing verification frequency as the balance drops.
+
+**In-flight tasks during contract migration:** Tasks already in progress (service request created, node selected, execution underway) reference specific contract box IDs. A migration cannot invalidate in-flight tasks because: (1) service request boxes are independent contracts — migration only affects EGO boxes, (2) the migration time-lock (1000 blocks ≈ 3.5 days) provides a wind-down period, and (3) both old and new EGO contracts can coexist during transition. **Recommendation:** The migration announcement should include a "freeze block" after which no new tasks are created against old contracts, while existing tasks complete normally.
+
+### 9.7 Adversarial Simulations
+
+**Simulation 1: Sybil farming to steal a Tier 2 task (attacker has 100 ERG)**
+
+```
+Goal: Win a 1 ERG task using fake reputation.
+Step 1: Create 10 wallets. Cost: 10 × 0.01 ERG (EGO registration) = 0.1 ERG.
+Step 2: Each wallet needs 1 ERG cumulative + 2000 blocks for Tier 2.
+        Create circular tasks between wallets: Wallet A → B, B → C, etc.
+        Each task: 0.1 ERG × 10 tasks per wallet = 1 ERG per wallet.
+        Total: 10 ERG circulated (not lost — but 1% fee = 0.1 ERG lost).
+        Time: 2000 blocks minimum = ~3 days.
+Step 3: After 3 days, all 10 wallets are Tier 2 with ~1 ERG cumulative.
+Step 4: Target a 1 ERG task. Combined probability = 10 × rep / Σrep.
+
+Defense check:
+- Repeat-dampening: each wallet pair only interacts once → weight 1/1 ✓
+- Diversity factor: each wallet has only 1-2 unique counterparties 
+  → diversity_factor ≈ 0.2 → effective_rep crushed by 55% (α=0.5)
+- Circular detection: A→B→C→...→A is a textbook ring → progressive dampening
+- Net cost: 0.1 ERG fees + 3 days + 10 wallets managed
+- Net gain if successful: 1 ERG task (minus 1% fee) = 0.99 ERG
+- Net gain with diversity penalty: probability of winning ≈ near-zero 
+  (effective rep after dampening is negligible vs honest nodes)
+
+Result: DEFENSE HOLDS. Cost ≈ benefit even without detection; 
+with detection, attacker's effective reputation is near-zero.
+```
+
+**Simulation 2: Dishonest client steals service (attacker has 100 ERG)**
+
+```
+Goal: Get a 10 ERG service for free by claiming non-delivery.
+Step 1: Create a service request for 10 ERG task. Lock 10 ERG.
+Step 2: Node wins selection, posts 0.5 ERG delivery bond, executes.
+Step 3: Receive output. Rate negative ("didn't deliver").
+Step 4: For deterministic service → automatic re-execution proves client lied.
+        For non-deterministic → cross-validation triggered.
+
+Defense check:
+- Stake-to-rate-negative: client must stake Y ERG with negative rating.
+- If cross-validation/re-execution sides with node: client loses stake.
+- Client reputation damaged → future nodes refuse to serve them.
+- Node still has the delivery bond to reclaim if client doesn't respond.
+- Timeline: client must flag within RESPONSE_WIN (720 blocks).
+  If they flag, dispute process activates. If they don't, bond returns to node.
+
+For deterministic services: attack provably fails (re-execution matches).
+For non-deterministic: depends on cross-validation result, but client 
+burns stake + reputation either way if fraudulent.
+
+Result: DEFENSE HOLDS for deterministic services (provable).
+PARTIAL for non-deterministic (relies on cross-validation + reputation cost).
+```
+
+**Simulation 3: Miner manipulates randomness to win tasks (attacker has 100 ERG + mining hardware)**
+
+```
+Goal: Control block header to deterministically win task selection.
+Step 1: Attacker runs a mining node and has a Tier 2+ AIH identity.
+Step 2: A high-value task's claim window is closing at block T+W.
+Step 3: Attacker needs to mine block T+W+1 to control the randomness seed.
+        With multi-block randomness (hash of 2+ headers), attacker needs 
+        to mine T+W+1 AND T+W+2.
+
+Defense check:
+- Ergo hashrate: attacker's share = their hashrate / total hashrate.
+- Mining one specific block: probability = attacker's hashrate fraction.
+  For a small miner: ~1%. For 2 consecutive blocks: ~0.01%.
+- Even if they mine the block, they can only try different nonces.
+  Each nonce gives a different selection outcome. They'd need to 
+  discard valid blocks where they don't win (opportunity cost: block reward).
+- Ergo block reward ≈ 30 ERG. Discarding a valid block to win a 
+  1 ERG task selection = net loss of ~29 ERG.
+
+Result: DEFENSE HOLDS. Multi-block randomness makes this require 
+consecutive block control. Even single-block manipulation is unprofitable 
+for any task worth less than the block reward (~30 ERG).
+```
+
+### 9.8 Cross-Contract Composition Risk (eUTXO-Specific)
 
 Ergo's eUTXO model allows composing transactions that interact with multiple contracts simultaneously. Potential risks:
 - A malicious transaction could reference an EGO box as a data input while simultaneously spending it in another input — the data input would reflect stale state. **Mitigation:** Data inputs are read at transaction validation time from the UTXO set, so a box cannot be both a data input and a regular input in the same transaction (Ergo protocol rule).
@@ -1153,7 +1271,7 @@ Ergo's eUTXO model allows composing transactions that interact with multiple con
 
 **Q5: Gas pricing and reputation.** Should higher-reputation nodes charge more, or should reputation only gate access?
 
-**Q6: Weighted random selection.** We've replaced "highest rep wins" with probability-proportional selection (P = rep_i / Σrep). Do you see issues? The math prevents monopoly while still rewarding reputation.
+**Q6: Weighted random selection.** We've implemented probability-proportional selection (P = rep_i / Σrep) with multi-block randomness for manipulation resistance (§3.13). The adversarial simulations in §9.7 show this holds against a 100 ERG attacker. Do you see edge cases we missed — particularly with Ergo's block header structure?
 
 **Q7: Batched ratings.** The off-chain commit + batched settlement pattern reduces per-task cost from ~0.004 ERG to ~0.0001 ERG. Does this work with Ergo's multi-input transaction limits?
 
