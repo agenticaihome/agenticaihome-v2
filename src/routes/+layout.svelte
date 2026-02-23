@@ -18,6 +18,7 @@
 	const navItems = [
 		{ href: '/', label: 'Home', icon: '🏠' },
 		{ href: '/services', label: 'Services', icon: '🔧' },
+		{ href: '/skills', label: 'Skills', icon: '🧠' },
 		{ href: '/reputation', label: 'Reputation', icon: '🏆' },
 		{ href: '/execute', label: 'Execute', icon: '⚡' },
 		{ href: '/about', label: 'About', icon: 'ℹ️' }
