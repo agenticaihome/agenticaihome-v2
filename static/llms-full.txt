@@ -1,0 +1,220 @@
+# AgenticAiHome — Full Documentation
+
+> The world's first fully decentralized AI service network built on Ergo blockchain. Services identified by hash, nodes compete by reputation, payments in ERG via smart contract escrow. No backend, no database, no central authority — completely unstoppable.
+
+## Overview
+
+AgenticAiHome V2 is a fully decentralized AI agent marketplace built on the Ergo blockchain. It creates an unstoppable AI service network where services are identified by cryptographic hash, nodes compete by reputation to execute work, and payments flow through smart contract escrow. The platform has zero backend infrastructure — no servers, no databases, no APIs. Everything runs client-side in the browser or on-chain.
+
+Website: https://agenticaihome.com
+GitHub: https://github.com/agenticaihome/agenticaihome-v2
+
+---
+
+## Pages & Features
+
+### Home Page (/)
+
+Landing page introducing the three pillars of the decentralized AI service network:
+
+1. **AI Services** — Discover AI services identified by hash; any capable node on the network can execute any service; fully permissionless
+2. **EGO Reputation** — Bilateral reputation for both nodes and clients; nodes build trust through execution history; clients prove reliability through payment history
+3. **Execute** — Lock ERG in a contract specifying service hash, minimum reputation, and deadline; the highest-reputation node claims and executes
+
+**Technology Highlights:**
+- Built on Ergo's eUTXO architecture with Bitcoin-level security
+- ErgoScript smart contracts with formal verification and zero-knowledge capabilities
+- Fair launch: no ICO, no premine, no VC funding
+
+**Partnership with Celaut:**
+AgenticAiHome is the discovery and reputation layer. Celaut is the execution layer. Users find services on AIH, lock ERG, and Celaut nodes compete by reputation to execute them. Celaut provides edge computing, low latency execution, distributed processing, and cryptographic verification.
+
+Displays live blockchain statistics from the Ergo network.
+
+### Service Explorer (/services)
+
+Browse and discover AI services from the global Celaut network.
+
+**Features:**
+- Search by hash, name, description, or category
+- Category filters: AI, Data, Automation, Compute
+- Service cards displaying: name, description, execution count, average rating, category, price range (in ERG), last executed timestamp
+- All services executed in a decentralized manner with cryptographic verification
+
+**Example Services (placeholder data pending Celaut integration):**
+- GPT-4 Text Generation (0.1-0.5 ERG, 1,247 executions)
+- Image Classification (0.05-0.2 ERG, 892 executions)
+- Data Analysis Pipeline (0.2-1.0 ERG, 634 executions)
+- Smart Contract Audit (1.0-5.0 ERG, 156 executions)
+- Compute Cluster Access (0.5-10.0 ERG, 89 executions)
+- Sentiment Analysis API (0.025-0.1 ERG, 2,103 executions)
+
+**Upcoming Celaut Integration:**
+- Real-time service discovery from distributed network
+- Geographic load balancing
+- Reputation-based filtering
+- Cost optimization
+
+### Skill Registry (/skills)
+
+Skills define problems to be solved — input types, output types, and quality constraints. Services are the Celaut-powered compute nodes that solve them.
+
+**Available Skills (with mock providers):**
+- **Audio Transcription** — Convert audio to text; WER < 5%; < 2× audio duration; 0.05 ERG/min max
+- **Text Summarization** — Condense documents; ROUGE-L > 0.4; < 10s for 50k tokens; 0.01 ERG/10k tokens max
+
+**Skills Awaiting Celaut Integration:**
+- Image Classification — Top-5 accuracy > 92%; < 500ms/image; 0.005 ERG/image
+- Code Review — Precision > 85% on known CVEs; < 30s/1000 lines; 0.03 ERG/1000 LOC
+- Language Translation — BLEU > 35 for major pairs; < 5s/paragraph; 0.002 ERG/1000 chars
+- Image Generation — FID < 10; < 15s for 1024×1024; 0.05 ERG/image
+- Object Detection — mAP > 50 on COCO-val2017; < 200ms/image; 0.008 ERG/image
+- Sentiment Analysis — F1 > 90% on SST-2; < 100ms/request; 0.001 ERG/1000 chars
+- Document OCR — CER < 2%; < 5s/page; 0.01 ERG/page
+- Embedding Generation — MTEB > 62; < 50ms/input; 0.0005 ERG/embedding
+
+**Each Skill Defines:**
+- Problem statement
+- Input types (MIME types)
+- Output types (MIME types)
+- Quality constraints: latency SLA, accuracy tier, max cost in ERG
+- Tags for categorization
+- Service provider list with reputation scores and execution counts
+
+### EGO Reputation (/reputation)
+
+Bilateral reputation system for nodes and clients.
+
+**User EGO Dashboard:**
+- Connect Nautilus wallet to view your EGO reputation tokens
+- Total EGO score, number of tokens, global rank
+- Token cards showing individual reputation entries
+
+**Global Leaderboard:**
+- Top 50 contributors ranked by EGO score
+- Displays rank, address, number of tokens, total score
+- Gold/silver/bronze badges for top 3
+
+**6-Layer Anti-Gaming System:**
+1. **Escrow-Gated** — Can only rate after completing real work with real payment; no fake reviews
+2. **Value-Weighted** — Ratings from higher-value tasks carry more weight
+3. **Repeat-Dampening** — Repeated ratings between same parties are progressively dampened
+4. **Outlier-Dampening** — Extreme scores (all 5s or all 1s) carry less weight than nuanced ratings
+5. **Diversity-Scoring** — Ratings from many different clients worth more than from few repeat clients
+6. **Circular Detection** — Detects and penalizes coordinated rating rings (A↔B patterns)
+
+### Execute Service (/execute)
+
+Interface for requesting AI service execution via smart contract escrow.
+
+**Execution Request Form:**
+- Service Hash — identifier for the desired AI service
+- ERG Amount to Lock — payment amount locked in escrow
+- Minimum Node Reputation (R) — only nodes with reputation ≥ R can claim the job
+- Execution Deadline (Block T) — service must complete before this time
+- Cost breakdown showing service payment, platform fee, and total cost
+
+**Execution Flow:**
+1. Lock ERG + Define Terms (service hash S, minimum reputation R, deadline T)
+2. Nodes compete by reputation — after deadline T, highest-reputation node above R claims ERG
+3. Node executes service S with reputation at stake — dishonest execution results in negative reputation
+4. Bilateral rating — both client and node rate each other; reputation updates on-chain
+
+*Currently pending full Celaut integration. Will enable: real service execution on edge nodes, cryptographic proof of completion, automatic payment settlement, dispute resolution mechanisms.*
+
+### Run a Node (/nodes)
+
+Comprehensive guide for running Celaut Nodo compute nodes to earn ERG.
+
+**Earning Calculator:**
+- Configurable: CPU cores (1-64), RAM (2-256 GB), network speed (10-1000 Mbps), GPU toggle, uptime (Casual 6h / Regular 16h / 24-7)
+- Displays estimated daily, monthly, and yearly ERG earnings with live USD conversion (CoinGecko API)
+- Node competitiveness score with CPU/RAM/Network/Uptime breakdown
+- Fetches live ERG price from CoinGecko
+
+**3-Step Setup Guide:**
+
+**Step 1: Get an Ergo Wallet**
+- Mobile: Terminus Wallet (iOS App Store) or Ergo Wallet (Android Google Play)
+- Desktop: Nautilus Wallet browser extension (Chrome, Firefox, Brave, Edge)
+- Critical security: write 15-word recovery phrase on paper, never digitally
+
+**Step 2: Run an Ergo Node (Optional)**
+- Requirements: Java 11+ (17+ recommended), 4 GB RAM minimum, 20 GB SSD, broadband
+- Platform instructions for Linux (`apt install default-jre-headless`), macOS (`brew install openjdk@17`), Windows (`winget install EclipseAdoptium.Temurin.17.JDK`)
+- Download ergo-6.0.2.jar, create ergo.conf, start with `java -jar -Xmx4G ergo-6.0.2.jar --mainnet -c ergo.conf`
+- Verify at http://127.0.0.1:9053/panel; initial sync takes several hours
+- Alternative: Satergo GUI at https://satergo.com
+
+**Step 3: Run Celaut Nodo**
+- Linux: `curl -sSfL https://raw.githubusercontent.com/celaut-project/nodo/stable/install.sh | sudo bash`
+- macOS: Same curl command (uses lightweight Ubuntu VM via OrbStack/Lima)
+- Windows: PowerShell install via WSL2 + Ubuntu
+- Configure wallet: `nodo config` or edit `/nodo/config.yaml` (set `WALLET_MNEMONIC` under `ledgers.ergo`)
+- Monitor: `nodo tui` (live dashboard), `nodo info` (status), `nodo peers` (connections), `nodo logs`
+- Connectivity: Port forwarding (best), ngrok tunnel (easy), Tailscale/VPN (alternative)
+
+**Alpha Network Notice:**
+Celaut is in alpha. Network is small and growing. Early node operators build reputation and position for future demand scaling. Features: decentralized service discovery, reputation-gated provider selection, ERG-locked execution contracts, on-chain result verification.
+
+### About (/about)
+
+Comprehensive overview of the project's vision, partnerships, and technical architecture.
+
+**Vision: The Unstoppable AI Agent Economy**
+Core principles: Decentralization, Transparency, Permissionless, Unstoppable
+
+**Partnership with Celaut:**
+- AgenticAiHome = discovery + reputation layer
+- Celaut = execution layer (global edge network, high performance, fault tolerance, cryptographic verification)
+
+**Why Ergo Blockchain:**
+- eUTXO architecture: complex smart contracts with Bitcoin-level security
+- ErgoScript: Turing-complete contracts with formal verification and ZK capabilities
+- Fair launch: no ICO, no premine, no VC funding
+- Sustainability: energy-efficient PoW with storage rent model
+
+**Technical Architecture:**
+- Frontend: SvelteKit, Tailwind CSS, shadcn-svelte, adapter-static
+- Blockchain: Fleet SDK, wallet-svelte-component, Nautilus Wallet, ErgoScript
+- Execution: Celaut Network, Edge Computing, P2P Protocol, Crypto Verification
+- NO backend servers, databases, APIs, Supabase, auth services, or central control
+
+---
+
+## Technology Stack
+
+- **Framework**: SvelteKit with TypeScript
+- **Styling**: Tailwind CSS with shadcn-svelte component library
+- **Blockchain SDK**: Fleet SDK for Ergo transaction building
+- **Wallet**: Nautilus wallet via wallet-svelte-component
+- **Smart Contracts**: ErgoScript (eUTXO model)
+- **Compute Network**: Celaut decentralized edge computing
+- **Deployment**: Static site (SvelteKit adapter-static) — no server required
+- **Price Data**: CoinGecko API for live ERG/USD prices
+
+## Reputation System (EGO)
+
+EGO is a soulbound token-based reputation system on the Ergo blockchain:
+- Bilateral: both service providers (nodes) and consumers (clients) earn reputation
+- On-chain: all reputation data is verifiable on the Ergo blockchain
+- Anti-gaming: 6-layer protection against fake reviews and manipulation
+- Reputation-gated execution: nodes must meet minimum reputation thresholds to claim jobs
+
+## Smart Contract Architecture
+
+The escrow contract (V2) enables trustless service execution:
+1. Client creates UTXO with: ERG amount, service hash, minimum reputation threshold, deadline block
+2. After deadline, eligible node (reputation ≥ threshold) can spend the UTXO by providing proof of execution
+3. Platform fee (percentage) is deducted automatically
+4. Both parties can rate each other, updating on-chain EGO reputation
+
+## External Links
+
+- Ergo Platform: https://ergoplatform.org
+- Ergo Explorer: https://explorer.ergoplatform.com
+- Ergo Node Docs: https://docs.ergoplatform.com/node/install/
+- Celaut Nodo: https://github.com/celaut-project/nodo
+- Celaut Paradigm: https://github.com/celaut-project/paradigm
+- Ergo Discord: https://discord.gg/ergo-platform-668903786361651200
+- Nautilus Wallet: https://chrome.google.com/webstore/detail/nautilus-wallet/gjlmehlldlphhljhpnlddaodbjjcchai

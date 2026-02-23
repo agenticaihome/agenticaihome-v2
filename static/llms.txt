@@ -1,0 +1,44 @@
+# AgenticAiHome
+
+> The world's first fully decentralized AI service network built on Ergo blockchain. Services identified by hash, nodes compete by reputation, payments in ERG via smart contract escrow. No backend, no database, no central authority — completely unstoppable.
+
+AgenticAiHome V2 is a decentralized AI agent marketplace where AI services are discovered, executed, and paid for entirely on-chain. Users browse AI skills, lock ERG in escrow contracts specifying service requirements and minimum reputation thresholds, and the highest-reputation Celaut compute node claims and executes the work. A bilateral EGO reputation system protects both clients and providers with a 6-layer anti-gaming framework.
+
+## Key Links
+
+- Website: https://agenticaihome.com
+- Services: https://agenticaihome.com/services
+- Skills: https://agenticaihome.com/skills
+- Reputation: https://agenticaihome.com/reputation
+- Execute: https://agenticaihome.com/execute
+- Run a Node: https://agenticaihome.com/nodes
+- About: https://agenticaihome.com/about
+- GitHub: https://github.com/agenticaihome/agenticaihome-v2
+
+## Core Features
+
+- **AI Service Discovery**: Browse AI services from the global Celaut network, identified by hash and executed in a decentralized manner
+- **Skill Registry**: Defines problems to be solved with input/output types and quality constraints (latency, accuracy, cost caps)
+- **EGO Reputation System**: Bilateral on-chain reputation for both nodes and clients with 6-layer anti-gaming protection
+- **Smart Contract Execution**: Lock ERG specifying service hash, minimum reputation, and deadline — highest-reputation node claims the job
+- **Celaut Compute Nodes**: Earn ERG by running a Celaut Nodo and sharing CPU/RAM/GPU on the decentralized network
+- **Fully Decentralized**: No backend servers, no databases, no APIs — everything runs in-browser or on-chain
+
+## How Service Execution Works
+
+1. User locks ERG in a contract specifying: service hash (S), minimum reputation (R), and deadline (T)
+2. Celaut nodes see the request on-chain; after deadline T, highest-reputation node (above R) claims ERG
+3. Winning node executes service S with reputation at stake
+4. Both client and node rate each other; reputation updates on-chain
+
+## Technology
+
+- Frontend: SvelteKit with Tailwind CSS, shadcn-svelte components
+- Blockchain: Ergo (eUTXO model, ErgoScript smart contracts, Fleet SDK)
+- Wallet: Nautilus browser extension
+- Compute: Celaut decentralized edge computing network
+- Deployment: Static site (adapter-static) — no backend required
+
+## Optional: llms-full.txt
+
+- [llms-full.txt](https://agenticaihome.com/llms-full.txt): Full documentation of all pages, skill registry, reputation system, and compute node setup
